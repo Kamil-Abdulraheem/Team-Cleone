@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cleone</title>
+<style>
+:root{--bg:#fcfcfc;--surface:#fff;--ink:#111;--mute:#8a8a8e;--line:#e8e8ea;--accent:#2f6bd6;--accent-soft:#e8f0fc;--ok:#1d8a4e;--shadow:0 2px 14px rgba(0,0,0,.07);color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161617;--surface:#202022;--ink:#f2f2f3;--mute:#8d8d93;--line:#2e2e31;--accent:#6b9cf0;--accent-soft:#1f2a40;--ok:#4cc27f;--shadow:0 2px 14px rgba(0,0,0,.4);color-scheme:dark}}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 Roboto,"Segoe UI",system-ui,sans-serif;display:flex;justify-content:center}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#app{width:100%;max-width:520px;height:100%;display:flex;flex-direction:column;position:relative;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px}
+header .r{display:flex;gap:18px;align-items:center}
+.up{color:var(--accent);font-weight:600;display:flex;gap:6px;align-items:center}
+.ic{color:var(--mute)}
+main{flex:1;overflow-y:auto;padding:0 20px}
+.home{min-height:100%;display:flex;flex-direction:column;justify-content:space-between;padding-bottom:12px}
+.home h1{font-size:2.1rem;font-weight:400;text-align:center;margin-top:22vh}
+.rows{display:flex;flex-direction:column;gap:6px;margin:0 0 20px}
+.row{display:flex;gap:18px;align-items:center;padding:14px 8px;color:var(--mute);font-size:1.15rem;text-align:left;border-radius:12px}
+.row:hover,.row:focus-visible{background:var(--accent-soft);color:var(--ink);outline:none}
+.bar{margin:0 12px 14px;background:var(--surface);border-radius:32px;box-shadow:var(--shadow);padding:16px 18px 12px}
+.bar input{width:100%;border:0;outline:0;background:none;font:inherit;font-size:1.1rem;color:var(--ink)}
+.bar .b{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
+.go{width:54px;height:54px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center}
+.go svg{stroke:#fff}
+h2{font-size:1.5rem;font-weight:500;margin:6px 0 4px}
+.sub{color:var(--mute);margin-bottom:18px}
+textarea,.in{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:16px;padding:14px;font:inherit;resize:vertical}
+.btn{background:var(--accent);color:#fff;padding:12px 20px;border-radius:24px;font-weight:500;margin-top:12px}
+.btn.ghost{background:var(--accent-soft);color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
+.chip{background:var(--accent-soft);color:var(--accent);padding:5px 12px;border-radius:20px;font-size:.92rem}
+.lab{color:var(--mute);font-size:.92rem;margin-top:14px}
+.card{background:var(--surface);border-radius:20px;box-shadow:var(--shadow);padding:18px;margin-bottom:16px}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.name{font-weight:600;font-size:1.1rem}
+.score{font-size:1.6rem;font-weight:600;color:var(--accent);line-height:1}
+.dims{display:flex;gap:14px;color:var(--mute);font-size:.88rem;margin:10px 0}
+.dims b{color:var(--ink);font-weight:600}
+.card a{color:var(--accent);text-decoration:none;word-break:break-all}
+.why{margin:10px 0 14px}
+.acts{display:flex;gap:10px;flex-wrap:wrap}
+.acts button{padding:9px 14px;border-radius:20px;background:var(--bg);border:1px solid var(--line);display:flex;gap:6px;align-items:center;font-size:.95rem}
+.acts button svg{width:18px;height:18px}
+.acts .p{background:var(--accent);color:#fff;border-color:var(--accent)}
+.acts .p svg{stroke:#fff}
+.sheet{position:absolute;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;z-index:20}
+.sheet.on{display:flex}
+.panel{background:var(--surface);width:100%;max-height:86%;overflow:auto;border-radius:24px 24px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom,0px));animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(40px);opacity:0}}
+@media(prefers-reduced-motion:reduce){.panel{animation:none}}
+.mail{white-space:pre-wrap;background:var(--bg);border-radius:14px;padding:14px;margin:12px 0;font-size:.97rem}
+.side{position:absolute;inset:0 30% 0 0;background:var(--surface);z-index:30;padding:24px 14px;transform:translateX(-102%);transition:transform .2s;box-shadow:var(--shadow)}
+.side.on{transform:none}
+.side .row{color:var(--ink);font-size:1.05rem}
+.side .brand{font-size:1.3rem;font-weight:600;padding:0 8px 14px}
+.w{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.sw{width:44px;height:26px;border-radius:14px;background:var(--line);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s}
+.sw.on{background:var(--ok)}.sw.on::after{left:21px}
+.toast{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:22px;font-size:.92rem;z-index:50;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.on{opacity:1}
+.back{color:var(--accent);margin-bottom:8px;display:flex;gap:4px;align-items:center}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+<button class="ic" id="menu" aria-label="Menu"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 4v16"/></svg></button>
+<div class="r"><span class="up"><svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>Upgrade</span>
+<button id="theme" aria-label="Toggle theme"><svg viewBox="0 0 24 24"><path d="M4 11h16M7 11l1.5-6h7L17 11M7 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm10 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM9.5 15.5h5"/></svg></button></div>
+</header>
+<main id="main"></main>
+
+<div class="side" id="side"></div>
+<div class="sheet" id="sheet"><div class="panel" id="panel"></div></div>
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+const I={
+img:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="11" r="2.5"/><path d="M8 17c1-2 2.5-3 4-3s3 1 4 3"/></svg>',
+pen:'<svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/></svg>',
+globe:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
+plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+mic:'<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+send:'<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+up:'<svg viewBox="0 0 24 24"><path d="M7 11v9H4v-9zM7 11l4-8c2 0 3 1 2.6 3L13 9h6a2 2 0 0 1 2 2.4l-1.3 7a2 2 0 0 1-2 1.6H7"/></svg>',
+x:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+mail:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 8l9 6 9-6"/></svg>',
+back:'<svg viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M15 6l-6 6 6 6"/></svg>'};
+
+const S={
+graph:null,
+weights:{rust:0,biotech:0,infra:0,seed:0},
+watchers:[
+{id:1,q:'AI infrastructure engineers shipping Rust repos',src:'GitHub',on:true},
+{id:2,q:'Biotech founders publishing clinical preprints',src:'arXiv',on:true},
+{id:3,q:'Agent tooling blogs and release feeds',src:'RSS',on:false}],
+feed:[
+{id:1,name:'Mara Okonkwo',art:'rustmesh: zero-copy tensor transport for inference clusters',url:'github.com/mokonkwo/rustmesh',score:91,sig:88,res:94,tim:90,tag:'rust',why:'Your past win scaling inference at a Series A maps directly to the bottleneck rustmesh targets. She cut p99 latency 38% in her v0.3 benchmarks, the exact metric you led on. The release landed 4 days ago and she just opened a call for design partners.'},
+{id:2,name:'Dr. Tomás Reyes',art:'arXiv 2611.04821: Cell-free expression for rapid antibody screening',url:'arxiv.org/abs/2611.04821',score:84,sig:86,res:82,tim:83,tag:'biotech',why:'Your thesis names cell-free platforms as an under-funded wedge. This preprint reports a 6x throughput gain and he is listed as sole corresponding author, which suggests he is spinning out.'},
+{id:3,name:'Priya Natarajan',art:'vecstore-rs v0.9: embedded vector index with SIMD filters',url:'github.com/pnat/vecstore-rs',score:78,sig:74,res:80,tim:80,tag:'infra',why:'Overlaps with your open CTO role for a retrieval-heavy product. Release cadence has doubled in 30 days, and she asked for production feedback in the issue tracker.'}],
+seen:{}
+};
+
+const $=s=>document.querySelector(s);
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1800)};
+const nav=v=>{$('#side').classList.remove('on');({home,onboarding,watchers,dashboard})[v]()};
+
+function home(){
+$('#main').innerHTML=`<div class="home"><h1>Ready when you are.</h1><div>
+<div class="rows">
+<button class="row" onclick="nav('onboarding')">${I.pen}Build my identity graph</button>
+<button class="row" onclick="nav('watchers')">${I.globe}Add a watcher</button>
+<button class="row" onclick="nav('dashboard')">${I.img}Open my collision feed</button></div>
+<div class="bar" style="margin:0"><input id="ask" placeholder="Describe who you want to meet" aria-label="Describe who you want to meet">
+<div class="b"><button class="ic" aria-label="Attach">${I.plus}</button><div style="display:flex;gap:14px;align-items:center"><button class="ic" aria-label="Voice">${I.mic}</button><button class="go" id="go" aria-label="Create watcher">${I.send}</button></div></div></div></div></div>`;
+$('#go').onclick=()=>{const v=$('#ask').value.trim();if(!v){nav('watchers');return}
+S.watchers.unshift({id:Date.now(),q:v,src:'GitHub + arXiv',on:true});toast('Watcher created');nav('watchers')};
+$('#ask').onkeydown=e=>{if(e.key==='Enter')$('#go').click()};
+}
+
+function onboarding(){
+const g=S.graph;
+$('#main').innerHTML=`<button class="back" onclick="nav('home')">${I.back}Home</button><h2>Your identity graph</h2>
+<p class="sub">Paste your bio, thesis or open roles. Cleone extracts what makes you a match.</p>
+<textarea id="bio" rows="7" placeholder="e.g. Former infra lead who scaled inference to 40M requests/day. Now investing pre-seed in AI infrastructure and cell-free biotech...">${S.bio||''}</textarea>
+<div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn ghost" id="up">Upload PDF or Markdown</button><button class="btn" id="ext">Extract graph</button></div>
+<input type="file" id="file" accept=".pdf,.md,.txt" hidden>
+<div id="out">${g?graphHTML(g):''}</div>`;
+$('#up').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;if(f.name.endsWith('.pdf')){toast('PDF parsing needs the backend. Paste text for now.');return}
+const r=new FileReader();r.onload=()=>{$('#bio').value=r.result;toast('File loaded')};r.readAsText(f)};
+$('#ext').onclick=()=>{
+const t=$('#bio').value.trim();if(t.length<20){toast('Add a longer bio first');return}
+S.bio=t;const l=t.toLowerCase();
+const pick=(m)=>m.filter(x=>l.includes(x[0])).map(x=>x[1]);
+S.graph={skills:pick([['rust','Rust'],['infra','Infrastructure'],['inference','ML inference'],['python','Python'],['kubern','Kubernetes'],['vector','Vector search']]),
+domains:pick([['biotech','Biotech'],['cell-free','Cell-free platforms'],['ai','Applied AI'],['fintech','Fintech'],['devtools','Developer tools']]),
+wins:pick([['scaled','Scaled a system to production'],['series','Raised or joined a venture round'],['exit','Prior exit'],['led','Led a team']]),
+triggers:['New release after quiet period','Call for design partners','Sole-author preprint']};
+for(const k in S.graph)if(!S.graph[k].length)S.graph[k]=['(add more detail)'];
+$('#out').innerHTML=graphHTML(S.graph);toast('Graph extracted (mock). Real build uses Claude.')};
+}
+function graphHTML(g){const c=(t,a)=>`<div class="lab">${t}</div><div class="chips">${a.map(x=>`<span class="chip">${x}</span>`).join('')}</div>`;
+return `<div style="margin-top:20px">${c('Skills',g.skills)}${c('Domain focus',g.domains)}${c('Past wins',g.wins)}${c('Target triggers',g.triggers)}</div>`}
+
+function watchers(){
+$('#main').innerHTML=`<button class="back" onclick="nav('home')">${I.back}Home</button><h2>Watchers</h2><p class="sub">Each watcher scans public signals on a schedule.</p>
+<div style="display:flex;gap:8px;margin-bottom:18px"><input class="in" id="nw" placeholder="New watcher, e.g. Rust database maintainers"><button class="btn" style="margin:0" id="aw">Add</button></div>
+${S.watchers.map(w=>`<div class="card w"><div><div class="name" style="font-size:1rem">${w.q}</div><div class="lab" style="margin:2px 0 0">${w.src}</div></div><button class="sw ${w.on?'on':''}" role="switch" aria-checked="${w.on}" aria-label="Toggle watcher" onclick="tg(${w.id})"></button></div>`).join('')}`;
+$('#aw').onclick=()=>{const v=$('#nw').value.trim();if(!v)return;S.watchers.unshift({id:Date.now(),q:v,src:'GitHub + arXiv',on:true});watchers()};
+}
+function tg(id){const w=S.watchers.find(x=>x.id===id);w.on=!w.on;watchers()}
+
+function dashboard(){
+const items=S.feed.filter(x=>!S.seen[x.id]&&x.score>=75).sort((a,b)=>(b.score+S.weights[b.tag]*3)-(a.score+S.weights[a.tag]*3));
+$('#main').innerHTML=`<button class="back" onclick="nav('home')">${I.back}Home</button><h2>Collisions this week</h2><p class="sub">Only matches scoring 75 or higher appear here.</p>
+${items.length?items.map(x=>`<div class="card"><div class="top"><div><div class="name">${x.name}</div><a href="https://${x.url}" target="_blank" rel="noopener">${x.art}</a></div><div class="score">${x.score}</div></div>
+<div class="dims"><span>Significance <b>${x.sig}</b></span><span>Resonance <b>${x.res}</b></span><span>Timing <b>${x.tim}</b></span></div>
+<p class="why">${x.why}</p>
+<div class="acts"><button class="p" onclick="brief(${x.id})">${I.mail}Generate outreach</button><button onclick="like(${x.id})">${I.up}Useful</button><button onclick="dismiss(${x.id})">${I.x}Dismiss</button></div></div>`).join(''):'<p class="sub">Nothing new. Add a watcher or check back after the next scan.</p>'}
+<p class="lab" style="margin-bottom:24px">Preference weights: ${Object.entries(S.weights).map(([k,v])=>k+' '+(v>0?'+':'')+v).join(', ')}</p>`;
+}
+function open_(h){$('#panel').innerHTML=h;$('#sheet').classList.add('on')}
+function close_(){$('#sheet').classList.remove('on')}
+function brief(id){const x=S.feed.find(f=>f.id===id);const first=x.name.split(' ')[0].replace('Dr.','').trim()||x.name;
+const me=(S.graph&&S.graph.wins[0]!=='(add more detail)')?S.graph.wins[0].toLowerCase():'scaling inference in production';
+const mail=`Subject: ${x.art.split(':')[0]} and a question\n\nHi ${first},\n\nI read through ${x.art} this week. The part that stood out was the design choice behind it, and it lines up with something I have spent years on: ${me}.\n\nI am not pitching anything generic. I would like to trade notes on where this goes next, and I may be able to open a few doors if it is useful. Do you have 20 minutes next week?\n\nBest,\n[Your name]`;
+open_(`<h2>Outreach for ${x.name}</h2><p class="sub">Draft references both of your work. Edit before sending.</p><div class="mail" contenteditable="true" id="m">${mail.replace(/</g,'&lt;')}</div><div class="acts"><button class="p" onclick="navigator.clipboard&&navigator.clipboard.writeText($('#m').innerText);toast('Copied')">Copy draft</button><button onclick="close_()">Close</button></div>`)}
+function like(id){const x=S.feed.find(f=>f.id===id);S.weights[x.tag]++;toast('Noted. More like this.');dashboard()}
+function dismiss(id){open_(`<h2>Why dismiss?</h2><p class="sub">Your reason adjusts future scoring.</p><div class="acts">${['Just noise','Wrong domain','Too early-stage','Bad timing'].map(r=>`<button onclick="doDismiss(${id},'${r}')">${r}</button>`).join('')}</div>`)}
+function doDismiss(id,r){const x=S.feed.find(f=>f.id===id);S.seen[id]=1;if(r==='Wrong domain'||r==='Just noise')S.weights[x.tag]--;close_();toast('Dismissed: '+r);dashboard()}
+
+$('#sheet').onclick=e=>{if(e.target.id==='sheet')close_()};
+$('#menu').onclick=()=>$('#side').classList.toggle('on');
+$('#theme').onclick=()=>{const r=document.documentElement;const dark=getComputedStyle(r).colorScheme==='dark';r.dataset.theme=dark?'light':'dark';
+if(!dark){r.style.cssText='--bg:#161617;--surface:#202022;--ink:#f2f2f3;--mute:#8d8d93;--line:#2e2e31;--accent:#6b9cf0;--accent-soft:#1f2a40;--ok:#4cc27f;--shadow:0 2px 14px rgba(0,0,0,.4);color-scheme:dark'}else{r.style.cssText=''}};
+$('#side').innerHTML=`<div class="brand">Cleone</div>
+<button class="row" onclick="nav('home')">${I.pen}Home</button><button class="row" onclick="nav('onboarding')">${I.img}Identity graph</button><button class="row" onclick="nav('watchers')">${I.globe}Watchers</button><button class="row" onclick="nav('dashboard')">${I.mail}Collision feed</button>`;
+home();
+</script>
+</body>
+</html>
