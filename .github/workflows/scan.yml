@@ -1,0 +1,47 @@
+name: Scan a repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "GitHub repo to scan, e.g. sharkdp/fd"
+        required: true
+      mode:
+        description: "dry = free GitHub-only check. full = also score with Claude (needs ANTHROPIC_API_KEY secret)"
+        type: choice
+        options:
+          - dry
+          - full
+        default: dry
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPO: ${{ inputs.repo }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          touch .env.local
+          FLAG=""
+          if [ "$MODE" = "dry" ]; then FLAG="--dry"; fi
+          npm run scan -- "$REPO" $FLAG --verbose 2>&1 | tee scan.txt
+          {
+            echo "## Scan: $REPO ($MODE)"
+            echo '```'
+            cat scan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
