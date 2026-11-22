@@ -18,12 +18,16 @@ CREATE TABLE IF NOT EXISTS candidates (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id     INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   lane           TEXT NOT NULL CHECK (lane IN ('strategic','joiners','investors')),
+  source         TEXT NOT NULL CHECK (source IN ('star','fork','similar')),
+  dedupe_key     TEXT NOT NULL,            -- stable identity across rescans, e.g. company:acme or person:alice
   handle         TEXT NOT NULL,
   name           TEXT NOT NULL,
   artifact_title TEXT NOT NULL,
   artifact_url   TEXT NOT NULL,
   facts          TEXT NOT NULL,
-  UNIQUE (project_id, artifact_url)
+  contact        TEXT NOT NULL DEFAULT '', -- public contact details only
+  signal         REAL NOT NULL DEFAULT 0,  -- deterministic evidence strength, 0-100
+  UNIQUE (project_id, dedupe_key)
 );
 
 CREATE TABLE IF NOT EXISTS matches (
@@ -34,6 +38,7 @@ CREATE TABLE IF NOT EXISTS matches (
   timing       INTEGER NOT NULL,
   score        REAL NOT NULL,
   why          TEXT NOT NULL,
+  signal_at_score REAL NOT NULL DEFAULT 0, -- candidate signal when last scored; drives rescoring
   status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','dismissed')),
   created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,6 +61,10 @@ const g = globalThis as unknown as { __cleoneDb?: Database.Database };
 function open(): Database.Database {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const d = new Database(file);
+  const cols = d.prepare("PRAGMA table_info(candidates)").all() as { name: string }[];
+  if (cols.length && !cols.some((c) => c.name === "dedupe_key")) {
+    throw new Error(`The database at ${file} uses an older schema. Delete it (it only holds scan results) and run again.`);
+  }
   d.pragma("journal_mode = WAL");
   d.pragma("foreign_keys = ON");
   d.exec(SCHEMA);

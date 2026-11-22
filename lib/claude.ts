@@ -4,6 +4,8 @@ import type { ProjectSummary } from "./github";
 export type ScoreInput = {
   id: number;
   lane: string;
+  source: string;
+  signal: number;
   handle: string;
   name: string;
   artifact_title: string;
@@ -68,6 +70,8 @@ export function parseScores(raw: string, allowedIds: Set<number>): Score[] {
 const SCORE_SYSTEM = `You rate whether a person or organization is a worthwhile contact for the founder of a software project.
 Use ONLY the facts supplied. Never invent details. If the facts are thin, score low.
 Be strict: most candidates should score under 60. Reserve 80+ for candidates with clear, specific, recent evidence.
+Each candidate carries evidence_strength (0-100), computed from public activity before you see it. Do not score a candidate far above what its facts support just because evidence_strength is high.
+A "company" candidate means several people at one organization engaged with the project; treat that as stronger than one individual doing the same.
 Return JSON only, no prose and no code fences.`;
 
 export async function scoreBatch(
@@ -75,6 +79,8 @@ export async function scoreBatch(
   batch: ScoreInput[]
 ): Promise<Score[]> {
   const user = `FOUNDER'S PROJECT
+TODAY: ${new Date().toISOString().slice(0, 10)}
+
 ${JSON.stringify(
     {
       repo: `${project.owner}/${project.name}`,
@@ -93,6 +99,8 @@ ${JSON.stringify(
     batch.map((c) => ({
       id: c.id,
       lane: c.lane,
+      source: c.source,
+      evidence_strength: c.signal,
       name: c.name,
       handle: c.handle,
       artifact: c.artifact_title,
@@ -105,7 +113,7 @@ ${JSON.stringify(
 For each candidate give integer scores 0-100:
 - significance: how important and relevant their artifact is to the project's problem space
 - resonance: how well their work fits a partnership, acquisition, hire or early-user relationship with this project
-- timing: how strong the evidence is that now is a good moment to reach out (recent activity, fresh fork, active repo)
+- timing: how strong the evidence is that now is a good moment to reach out, judged against TODAY (a star or push this week is strong; months ago is weak)
 Then "why": two sentences citing specific supplied facts. No flattery.
 
 Return a JSON array: [{"id":1,"significance":0,"resonance":0,"timing":0,"why":"..."}]`;

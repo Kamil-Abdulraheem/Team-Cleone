@@ -4,10 +4,14 @@ import { draftOutreach, scoreBatch, type ScoreInput } from "./claude";
 
 export const CUTOFF = 75;
 const BATCH = 10;
+const RESCORE_DELTA = 15;
 
 export type MatchRow = {
   id: number;
   lane: Lane;
+  source: string;
+  signal: number;
+  contact: string;
   handle: string;
   name: string;
   artifact_title: string;
@@ -48,41 +52,51 @@ export async function runScan(repoUrl: string) {
       summary: JSON.stringify(summary),
     }) as { id: number };
 
-  const candidates = await collect(summary);
+  const { candidates, stats } = await collect(summary);
   const insert = db.prepare(
-    `INSERT OR IGNORE INTO candidates
-       (project_id, lane, handle, name, artifact_title, artifact_url, facts)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO candidates
+       (project_id, lane, source, dedupe_key, handle, name, artifact_title, artifact_url, facts, contact, signal)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, dedupe_key) DO UPDATE SET
+       lane = excluded.lane, source = excluded.source, name = excluded.name,
+       artifact_title = excluded.artifact_title, artifact_url = excluded.artifact_url,
+       facts = excluded.facts, contact = excluded.contact, signal = excluded.signal`
   );
   db.transaction(() => {
     for (const c of candidates) {
-      insert.run(project.id, c.lane, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts);
+      insert.run(project.id, c.lane, c.source, c.dedupe_key, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, c.contact, c.signal);
     }
   })();
 
-  // Only score candidates that have no match row yet. This keeps cost down on rescans.
+  // Score candidates that are new, or whose evidence grew materially since they were last scored
+  // (for example a third engineer from the same company starred the repo). Everything else is skipped
+  // to control cost on rescans.
   const unscored = db
     .prepare(
-      `SELECT c.id, c.lane, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts
+      `SELECT c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts
        FROM candidates c LEFT JOIN matches m ON m.candidate_id = c.id
-       WHERE c.project_id = ? AND m.id IS NULL`
+       WHERE c.project_id = ? AND (m.id IS NULL OR c.signal - m.signal_at_score >= ?)`
     )
-    .all(project.id) as ScoreInput[];
+    .all(project.id, RESCORE_DELTA) as ScoreInput[];
+  const signalOf = new Map(unscored.map((c) => [c.id, c.signal]));
 
   const save = db.prepare(
-    `INSERT OR IGNORE INTO matches (candidate_id, significance, resonance, timing, score, why)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO matches (candidate_id, significance, resonance, timing, score, why, signal_at_score)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(candidate_id) DO UPDATE SET
+       significance = excluded.significance, resonance = excluded.resonance, timing = excluded.timing,
+       score = excluded.score, why = excluded.why, signal_at_score = excluded.signal_at_score`
   );
   let scored = 0;
   for (let i = 0; i < unscored.length; i += BATCH) {
     const scores = await scoreBatch(summary, unscored.slice(i, i + BATCH));
     db.transaction(() => {
-      for (const s of scores) save.run(s.id, s.significance, s.resonance, s.timing, s.score, s.why);
+      for (const s of scores) save.run(s.id, s.significance, s.resonance, s.timing, s.score, s.why, signalOf.get(s.id) ?? 0);
     })();
     scored += scores.length;
   }
 
-  return { projectId: project.id, collected: candidates.length, scored, ...listMatches(project.id) };
+  return { projectId: project.id, collected: candidates.length, scored, stats, ...listMatches(project.id) };
 }
 
 function laneBias(projectId: number): Record<string, number> {
@@ -105,7 +119,7 @@ function laneBias(projectId: number): Record<string, number> {
 export function listMatches(projectId: number) {
   const rows = db
     .prepare(
-      `SELECT m.id, c.lane, c.handle, c.name, c.artifact_title, c.artifact_url,
+      `SELECT m.id, c.lane, c.source, c.signal, c.contact, c.handle, c.name, c.artifact_title, c.artifact_url,
               m.significance, m.resonance, m.timing, m.score, m.why
        FROM matches m JOIN candidates c ON c.id = m.candidate_id
        WHERE c.project_id = ? AND m.status = 'new' AND m.score >= ?`
@@ -129,7 +143,7 @@ export function listMatches(projectId: number) {
 export async function outreachFor(matchId: number): Promise<string> {
   const row = db
     .prepare(
-      `SELECT m.why, c.id, c.lane, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, p.summary
+      `SELECT m.why, c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, p.summary
        FROM matches m
        JOIN candidates c ON c.id = m.candidate_id
        JOIN projects p ON p.id = c.project_id
