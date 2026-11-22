@@ -22,6 +22,8 @@ export type Score = {
   why: string;
 };
 
+export const hasClaude = () => !!process.env.ANTHROPIC_API_KEY;
+
 const SCORE_MODEL = () => process.env.SCORE_MODEL || "claude-sonnet-5-5";
 const OUTREACH_MODEL = () => process.env.OUTREACH_MODEL || "claude-opus-5-5";
 
@@ -88,7 +90,7 @@ ${JSON.stringify(
       topics: project.topics,
       language: project.language,
       stars: project.stars,
-      readme_excerpt: project.readme,
+      readme_excerpt: project.readme.slice(0, 1500),
     },
     null,
     1

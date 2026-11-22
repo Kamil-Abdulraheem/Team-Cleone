@@ -1,20 +1,25 @@
 import type { Lane } from "./db";
 
+// This module runs in Node (CLI, API routes) and in the browser (the static app), so it only
+// uses fetch and plain JS. No Node-only imports.
+
 const API = "https://api.github.com";
 const DAY = 86_400_000;
 
 // ---- Tunables. Every threshold lives here so scan quality can be tuned in one place. ----
-export const MIN_SIGNAL = 40; // evidence strength (0-100) a candidate needs to reach Claude
+export const MIN_SIGNAL = 40; // evidence strength (0-100) a candidate needs to be kept
 export const MIN_RELEVANCE = 5; // topic/language/keyword overlap a similar repo needs
 export const MAX_CANDIDATES = 30;
 const QUOTAS: Record<Source, number> = { star: 12, similar: 12, fork: 6 };
-const STARS_WANTED = 40; // newest stargazers to profile
-const FORK_BUDGET = { org: 10, modified: 15, plain: 5 };
-const SIMILAR_OWNERS_PROFILED = 25;
 const COMPANY_MIN_PEOPLE = 2; // a company becomes a strategic "entity" at 2+ engaged people
 const COMPANY_MIN_TOP_SIGNAL = 30; // ...and at least one of them must look like a real account
 const COMPANY_BONUS_PER_EXTRA = 8;
-const STRATEGIC_SOLO_MIN = 60; // one strong person who names an employer also counts as company-level interest
+const STRATEGIC_SOLO_MIN = 60; // one strong person who names an employer also counts as company interest
+
+// Full mode needs a token (about 100-150 calls). Lite mode fits inside GitHub's 60 calls an hour
+// for unauthenticated callers, so the app still works before a token is added.
+const FULL = { stars: 40, eventPages: 3, fork: { org: 10, modified: 15, plain: 5 }, owners: 25, queries: 5, enrich: true };
+const LITE = { stars: 15, eventPages: 1, fork: { org: 3, modified: 5, plain: 1 }, owners: 10, queries: 3, enrich: false };
 
 export type Source = "star" | "fork" | "similar";
 
@@ -29,6 +34,22 @@ export type ProjectSummary = {
   readme: string;
 };
 
+/** Structured facts the rule-based scorer and email template use. All values come from public data. */
+export type CandidateMeta = {
+  kind: Source;
+  freshestAt: string; // ISO date of the newest evidence
+  relevance: number; // similar-project relevance, 0 if none
+  repoStars: number; // stars of the similar project, 0 if none
+  people: number;
+  followers: number;
+  company: string;
+  lastPushAt: string;
+  topRepo: string;
+  evidence: string;
+  blurb: string;
+  displayName: string;
+};
+
 export type Candidate = {
   lane: Lane;
   source: Source;
@@ -40,9 +61,11 @@ export type Candidate = {
   facts: string;
   contact: string; // public contact details only
   signal: number; // deterministic evidence strength, 0-100
+  meta: CandidateMeta;
 };
 
 export type CollectStats = {
+  mode: "full" | "lite";
   fetched: { stars: number; forks: number; similarRepos: number };
   profiles: number;
   dropped: { notAPerson: number; lowSignal: number; irrelevantRepos: number };
@@ -86,18 +109,25 @@ export class GitHubError extends Error {
   }
 }
 
-// ------------------------------------------------------------------ HTTP layer
+// ------------------------------------------------------------------ token + HTTP layer
+
+let tokenOverride: string | undefined;
+export const setGithubToken = (t?: string) => {
+  tokenOverride = t?.trim() || undefined;
+};
+const getToken = () =>
+  tokenOverride ?? (typeof process !== "undefined" ? process.env?.GITHUB_TOKEN || undefined : undefined);
+export const hasGithubToken = () => !!getToken();
+const budget = () => (hasGithubToken() ? FULL : LITE);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const limits: Record<string, { remaining: number; reset: number }> = {};
 
 function headers(accept: string) {
-  const h: Record<string, string> = {
-    Accept: accept,
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "cleone",
-  };
-  if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const h: Record<string, string> = { Accept: accept, "X-GitHub-Api-Version": "2022-11-28" };
+  if (typeof window === "undefined") h["User-Agent"] = "cleone"; // browsers set their own
+  const t = getToken();
+  if (t) h.Authorization = `Bearer ${t}`;
   return h;
 }
 
@@ -107,7 +137,7 @@ async function request(path: string, accept: string, attempt = 0): Promise<Respo
   if (lim && lim.remaining < 2 && Date.now() < lim.reset * 1000) {
     throw new GitHubError(
       429,
-      `GitHub ${resource} rate limit reached. Resets at ${new Date(lim.reset * 1000).toISOString()}. Set GITHUB_TOKEN to raise limits.`
+      `GitHub rate limit reached. It resets at ${new Date(lim.reset * 1000).toLocaleTimeString()}. Add a GitHub token to raise the limit.`
     );
   }
   const res = await fetch(API + path, { headers: headers(accept), cache: "no-store" });
@@ -129,8 +159,10 @@ async function gh<T>(path: string, accept = "application/vnd.github+json"): Prom
     throw new GitHubError(
       res.status,
       limited
-        ? "GitHub rate limit or access problem. Set GITHUB_TOKEN to raise limits."
-        : `GitHub returned ${res.status} for ${path}`
+        ? "GitHub rate limit reached. Add a GitHub token to raise the limit."
+        : res.status === 404 && /^\/repos\/[^/]+\/[^/]+$/.test(path.split("?")[0])
+          ? "That repository was not found. Check the name, and note that private repos cannot be scanned."
+          : `GitHub returned ${res.status} for ${path}`
     );
   }
   return (await res.json()) as T;
@@ -179,7 +211,7 @@ export function parseRepo(input: string): { owner: string; name: string } {
 async function readme(owner: string, name: string): Promise<string> {
   try {
     const res = await request(`/repos/${owner}/${name}/readme`, "application/vnd.github.raw+json");
-    return res.ok ? (await res.text()).slice(0, 1500) : "";
+    return res.ok ? (await res.text()).slice(0, 4000) : "";
   } catch {
     return "";
   }
@@ -199,7 +231,50 @@ export async function fetchProject(owner: string, name: string): Promise<Project
   };
 }
 
-// ------------------------------------------------------------------ scoring helpers
+// ------------------------------------------------------------------ text and link hygiene
+
+/** One line, no control characters, no keyboard-mash, bounded length. Empty string if unusable. */
+export function cleanText(s: string | null | undefined, max = 140): string {
+  if (!s) return "";
+  const t = s.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || /(.)\1{9,}/u.test(t)) return "";
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
+}
+
+/** Public http(s) links only. Drops localhost, IP addresses and private hosts. */
+export function cleanUrl(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim();
+  if (!s || /\s/.test(s)) return "";
+  let u: URL;
+  try {
+    u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
+  } catch {
+    return "";
+  }
+  const h = u.hostname.toLowerCase();
+  if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+  if (!h.includes(".") || /^\d+\.\d+\.\d+\.\d+$/.test(h) || h.includes(":")) return "";
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".localhost")) return "";
+  return u.toString().replace(/\/$/, "");
+}
+
+function cleanEmail(e: string | null | undefined): string {
+  const s = (e ?? "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) || /no-?reply/i.test(s)) return "";
+  return s;
+}
+
+function contactOf(u: GhUser): string {
+  const parts: string[] = [];
+  const email = cleanEmail(u.email);
+  if (email) parts.push(`email ${email}`);
+  const web = cleanUrl(u.blog);
+  if (web) parts.push(`web ${web}`);
+  if (u.twitter_username && /^[A-Za-z0-9_]{1,15}$/.test(u.twitter_username)) parts.push(`x.com/${u.twitter_username}`);
+  return parts.join(" | ");
+}
+
+// ------------------------------------------------------------------ relevance and signal
 
 const GENERIC_TOPICS = new Set([
   "cli", "command-line", "tool", "tools", "hacktoberfest", "terminal", "library", "framework",
@@ -212,26 +287,42 @@ const STOP = new Set([
   "with", "that", "this", "from", "your", "have", "into", "than", "them", "their", "will", "using",
   "used", "also", "more", "most", "fast", "very", "simple", "tool", "tools", "library", "based",
   "like", "just", "only", "other", "some", "what", "when", "which", "build", "built", "make",
-  "write", "written", "easy", "modern", "powerful", "lightweight",
+  "write", "written", "easy", "modern", "powerful", "lightweight", "install", "installation",
+  "usage", "example", "examples", "license", "contributing", "https", "http", "www", "github",
+  "readme", "following", "default", "version", "release", "releases", "documentation", "docs",
+  "please", "note", "support", "available", "instructions", "section", "binary", "binaries",
+  "building", "development", "should", "would", "could", "there", "these", "those", "here",
 ]);
 
-const tokens = (s: string) =>
-  s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !STOP.has(w));
+const stem = (w: string) =>
+  w.replace(/(ches|shes|sses|xes)$/, (m) => m.slice(0, -2)).replace(/ies$/, "y").replace(/([^s])s$/, "$1");
 
-function relevance(p: ProjectSummary, r: GhRepo, kw: Set<string>): { score: number; shared: string[] } {
+const tokens = (s: string) =>
+  s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !STOP.has(w)).map(stem);
+
+/** What the project is about: its description, name, and the most repeated words in its README. */
+function keywordSet(p: ProjectSummary): Set<string> {
+  const set = new Set<string>([...tokens(p.description), ...tokens(p.name)]);
+  const freq = new Map<string, number>();
+  for (const w of tokens(p.readme)) freq.set(w, (freq.get(w) ?? 0) + 1);
+  [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).forEach(([w]) => set.add(w));
+  return set;
+}
+
+function relevance(p: ProjectSummary, r: GhRepo, kw: Set<string>) {
   const pt = new Set(p.topics);
   const shared: string[] = [];
-  let s = 0;
+  let score = 0;
   for (const t of r.topics ?? []) {
     if (!pt.has(t)) continue;
     shared.push(t);
-    s += GENERIC_TOPICS.has(t) ? 0.5 : 3;
+    score += GENERIC_TOPICS.has(t) ? 0.5 : 3;
   }
-  if (p.language && r.language === p.language) s += 2;
+  if (p.language && r.language === p.language) score += 2;
   let overlap = 0;
   for (const w of new Set(tokens(`${r.name} ${r.description ?? ""}`))) if (kw.has(w)) overlap++;
-  s += Math.min(3, overlap);
-  return { score: s, shared };
+  score += Math.min(3, overlap);
+  return { score, shared, overlap };
 }
 
 /** How real and established an account looks, 0-80. Evidence bonuses are added on top. */
@@ -240,7 +331,7 @@ function profileSignal(u: GhUser): number {
   const repos = Math.min(15, Math.log10(u.public_repos + 1) * 8);
   const years = (Date.now() - new Date(u.created_at).getTime()) / (365 * DAY);
   const age = Math.max(0, Math.min(10, years * 2.5));
-  const completeness = (u.bio ? 10 : 0) + (u.company ? 10 : 0) + (u.blog ? 5 : 0);
+  const completeness = (cleanText(u.bio) ? 10 : 0) + (u.company ? 10 : 0) + (cleanUrl(u.blog) ? 5 : 0);
   return followers + repos + age + completeness;
 }
 
@@ -250,8 +341,9 @@ const NO_COMPANY = new Set([
 ]);
 
 function companyOf(raw: string | null): { key: string; label: string } | null {
-  if (!raw) return null;
-  const label = raw.replace(/^@+/, "").split(/[,/|]/)[0].trim();
+  const c = cleanText(raw, 60);
+  if (!c) return null;
+  const label = c.replace(/^@+/, "").split(/[,/|]/)[0].trim();
   const key = label
     .toLowerCase()
     .replace(/\b(inc|ltd|llc|gmbh|corp|co|limited)\.?$/g, "")
@@ -266,17 +358,18 @@ function ago(iso: string): string {
   return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`;
 }
 
-function contactOf(u: GhUser): string {
-  const parts: string[] = [];
-  if (u.email) parts.push(`email ${u.email}`);
-  if (u.blog) parts.push(`web ${u.blog.startsWith("http") ? u.blog : `https://${u.blog}`}`);
-  if (u.twitter_username) parts.push(`x.com/${u.twitter_username}`);
-  return parts.join(" | ");
-}
-
 // ------------------------------------------------------------------ data sources
 
-type Ev = { kind: Source; bonus: number; text: string; title: string; url: string };
+type Ev = {
+  kind: Source;
+  bonus: number;
+  text: string;
+  title: string;
+  url: string;
+  at: string;
+  rel: number;
+  repoStars: number;
+};
 type Person = { login: string; u: GhUser; ev: Ev[]; signal: number };
 type Draft = {
   lane: Lane;
@@ -290,6 +383,7 @@ type Draft = {
   people: Person[];
   label?: string;
 };
+type Star = { login: string; at: string; type: string };
 
 const profileCache = new Map<string, { at: number; u: GhUser | null }>();
 async function profile(login: string): Promise<GhUser | null> {
@@ -309,12 +403,10 @@ async function profile(login: string): Promise<GhUser | null> {
   }
 }
 
-type Star = { login: string; at: string; type: string };
-
 /** Stars from the public events feed: timestamped, newest first, last ~90 days. Works for any repo. */
-async function starsFromEvents(p: ProjectSummary): Promise<Star[]> {
+async function starsFromEvents(p: ProjectSummary, pages: number): Promise<Star[]> {
   const out: Star[] = [];
-  for (let pg = 1; pg <= 3; pg++) {
+  for (let pg = 1; pg <= pages; pg++) {
     const items = await gh<{ type: string; created_at: string; actor: { login: string } }[]>(
       `/repos/${p.owner}/${p.name}/events?per_page=100&page=${pg}`
     );
@@ -325,7 +417,7 @@ async function starsFromEvents(p: ProjectSummary): Promise<Star[]> {
 }
 
 /** Stargazers API: complete history, so it covers small repos whose events have aged out. */
-async function starsFromStargazers(p: ProjectSummary): Promise<Star[]> {
+async function starsFromStargazers(p: ProjectSummary, want: number): Promise<Star[]> {
   const last = Math.max(1, Math.ceil(p.stars / 100));
   const pages = last > 1 ? [last, last - 1] : [1];
   const out: Star[] = [];
@@ -335,43 +427,50 @@ async function starsFromStargazers(p: ProjectSummary): Promise<Star[]> {
       "application/vnd.github.star+json"
     );
     for (const i of items) out.push({ login: i.user.login, at: i.starred_at, type: i.user.type });
-    if (out.length >= STARS_WANTED) break;
+    if (out.length >= want) break;
   }
   return out;
 }
 
 async function recentStars(p: ProjectSummary, warnings: string[]): Promise<Star[]> {
-  const [ev, sg] = await Promise.allSettled([starsFromEvents(p), starsFromStargazers(p)]);
+  const b = budget();
   const merged = new Map<string, Star>();
-  for (const r of [ev, sg]) {
-    if (r.status !== "fulfilled") continue;
-    for (const s of r.value) {
+  const take = (list: Star[]) => {
+    for (const s of list) {
       const k = s.login.toLowerCase();
       const prev = merged.get(k);
       if (!prev || s.at > prev.at) merged.set(k, s);
     }
+  };
+  let evErr: unknown;
+  try {
+    take(await starsFromEvents(p, b.eventPages));
+  } catch (e) {
+    evErr = e;
   }
-  if (!merged.size) {
-    for (const r of [ev, sg]) {
-      if (r.status === "rejected") warnings.push(`star lookup failed: ${r.reason instanceof Error ? r.reason.message : "error"}`);
+  // Only spend extra calls on the stargazers API when the events feed came up short.
+  if (merged.size < b.stars / 2) {
+    try {
+      take(await starsFromStargazers(p, b.stars));
+    } catch (e) {
+      if (!merged.size) warnings.push(`star lookup failed: ${(evErr ?? e) instanceof Error ? ((evErr ?? e) as Error).message : "error"}`);
     }
   }
   return [...merged.values()]
     .filter((s) => s.login.toLowerCase() !== p.owner.toLowerCase() && !s.login.includes("[bot]") && s.type === "User")
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, STARS_WANTED);
+    .sort((a, b2) => b2.at.localeCompare(a.at))
+    .slice(0, b.stars);
 }
 
 async function forkPicks(p: ProjectSummary): Promise<{ all: number; picks: { repo: GhRepo; modified: boolean }[] }> {
+  const fb = budget().fork;
   const forks = await gh<GhRepo[]>(`/repos/${p.owner}/${p.name}/forks?sort=newest&per_page=100`);
   const seen = new Set<string>([p.owner.toLowerCase()]);
-  const tag = forks
-    .filter((f) => !seen.has(f.owner.login.toLowerCase()))
-    .map((repo) => ({
-      repo,
-      // A fresh fork keeps the parent's pushed_at. If it moved past created_at, the owner committed.
-      modified: new Date(repo.pushed_at).getTime() > new Date(repo.created_at).getTime() + 60_000,
-    }));
+  const tag = forks.map((repo) => ({
+    repo,
+    // A fresh fork keeps the parent's pushed_at. If it moved past created_at, the owner committed.
+    modified: new Date(repo.pushed_at).getTime() > new Date(repo.created_at).getTime() + 60_000,
+  }));
   const picks: { repo: GhRepo; modified: boolean }[] = [];
   const take = (arr: typeof tag, n: number) => {
     for (const f of arr) {
@@ -383,12 +482,9 @@ async function forkPicks(p: ProjectSummary): Promise<{ all: number; picks: { rep
       n--;
     }
   };
-  take(tag.filter((f) => f.repo.owner.type === "Organization"), FORK_BUDGET.org);
-  take(
-    tag.filter((f) => f.modified).sort((a, b) => b.repo.pushed_at.localeCompare(a.repo.pushed_at)),
-    FORK_BUDGET.modified
-  );
-  take(tag.filter((f) => !f.modified), FORK_BUDGET.plain);
+  take(tag.filter((f) => f.repo.owner.type === "Organization"), fb.org);
+  take(tag.filter((f) => f.modified).sort((a, b) => b.repo.pushed_at.localeCompare(a.repo.pushed_at)), fb.modified);
+  take(tag.filter((f) => !f.modified), fb.plain);
   return { all: forks.length, picks };
 }
 
@@ -403,17 +499,14 @@ function searchQueries(p: ProjectSummary): string[] {
   for (const pr of pairs.slice(0, 3)) qs.push(`${pr} stars:>=10 ${base}`);
   for (const t of specific.slice(0, 2)) qs.push(`topic:${t} stars:>=50 ${base}`);
   if (!qs.length) {
-    const kw = [...new Set(tokens(p.description))].slice(0, 3).join(" ");
+    const kw = [...keywordSet(p)].slice(0, 3).join(" ");
     if (kw) qs.push(`${kw} in:name,description${p.language ? ` language:${p.language}` : ""} stars:>=20 ${base}`);
   }
-  return qs;
+  return qs.slice(0, budget().queries);
 }
 
-async function similarRepos(
-  p: ProjectSummary,
-  warnings: string[]
-): Promise<{ fetched: number; irrelevant: number; kept: { repo: GhRepo; rel: number; shared: string[] }[] }> {
-  const kw = new Set([...tokens(p.description), ...tokens(p.name)]);
+async function similarRepos(p: ProjectSummary, warnings: string[]) {
+  const kw = keywordSet(p);
   const byName = new Map<string, GhRepo>();
   for (const q of searchQueries(p)) {
     try {
@@ -426,8 +519,9 @@ async function similarRepos(
     }
   }
   const scored = [...byName.values()].map((repo) => ({ repo, ...relevance(p, repo, kw) }));
+  // Topic overlap alone is not enough: the repo's own description must also talk about the same things.
   const rel = scored
-    .filter((x) => x.score >= MIN_RELEVANCE)
+    .filter((x) => x.score >= MIN_RELEVANCE && x.overlap >= 1)
     .sort((a, b) => b.score - a.score || b.repo.stargazers_count - a.repo.stargazers_count);
   const owners = new Set<string>([p.owner.toLowerCase()]);
   const kept: { repo: GhRepo; rel: number; shared: string[] }[] = [];
@@ -436,7 +530,7 @@ async function similarRepos(
     if (owners.has(o)) continue;
     owners.add(o);
     kept.push({ repo: x.repo, rel: x.score, shared: x.shared });
-    if (kept.length >= SIMILAR_OWNERS_PROFILED) break;
+    if (kept.length >= budget().owners) break;
   }
   return { fetched: scored.length, irrelevant: scored.length - rel.length, kept };
 }
@@ -461,11 +555,14 @@ function compose(drafts: Draft[]): Draft[] {
 function personFacts(pr: Person, repos?: GhRepo[]): string[] {
   const u = pr.u;
   const age = ((Date.now() - new Date(u.created_at).getTime()) / (365 * DAY)).toFixed(1);
-  const lines = [`${u.name || u.login} (@${u.login}, ${u.type})`];
+  const lines = [`${cleanText(u.name, 60) || u.login} (@${u.login}, ${u.type})`];
   for (const e of [...pr.ev].sort((a, b) => b.bonus - a.bonus)) lines.push(`Evidence: ${e.text}`);
-  if (u.bio) lines.push(`Bio: ${u.bio}`);
-  if (u.company) lines.push(`Company: ${u.company}`);
-  if (u.location) lines.push(`Location: ${u.location}`);
+  const bio = cleanText(u.bio);
+  if (bio) lines.push(`Bio: ${bio}`);
+  const company = cleanText(u.company, 60);
+  if (company) lines.push(`Company: ${company}`);
+  const loc = cleanText(u.location, 60);
+  if (loc) lines.push(`Location: ${loc}`);
   lines.push(`Followers: ${u.followers}; public repos: ${u.public_repos}; account age: ${age} years`);
   if (repos?.length) {
     lines.push(
@@ -476,9 +573,51 @@ function personFacts(pr: Person, repos?: GhRepo[]): string[] {
   return lines;
 }
 
-export async function collect(p: ProjectSummary): Promise<{ candidates: Candidate[]; stats: CollectStats }> {
+function draftFor(pr: Person, lane: Lane, company?: string): Draft {
+  const best = [...pr.ev].sort((a, b) => b.bonus - a.bonus)[0];
+  return {
+    lane,
+    source: best.kind,
+    key: `person:${pr.login.toLowerCase()}`,
+    handle: pr.login,
+    name: cleanText(pr.u.name, 60) || pr.login,
+    title: company ? `${best.title}, works at ${company}` : best.title,
+    url: best.url,
+    signal: pr.signal,
+    people: [pr],
+  };
+}
+
+function metaFor(d: Draft, repos?: GhRepo[]): CandidateMeta {
+  const top = d.people[0];
+  const evs = d.people.flatMap((p) => p.ev);
+  const best = [...top.ev].sort((a, b) => b.bonus - a.bonus)[0];
+  const rel = [...evs].sort((a, b) => b.rel - a.rel)[0];
+  const company = d.label ?? companyOf(top.u.company)?.label ?? "";
+  return {
+    kind: d.source,
+    freshestAt: evs.map((e) => e.at).sort().pop() ?? new Date().toISOString(),
+    relevance: rel?.rel ?? 0,
+    repoStars: rel?.rel ? rel.repoStars : 0,
+    people: d.people.length,
+    followers: top.u.followers,
+    company,
+    lastPushAt: repos?.[0]?.pushed_at ?? "",
+    topRepo: repos?.[0]?.name ?? "",
+    evidence: best.text,
+    blurb: cleanText(top.u.bio, 100),
+    displayName: cleanText(top.u.name, 60) || top.login,
+  };
+}
+
+export async function collect(
+  p: ProjectSummary,
+  onStage?: (s: string) => void
+): Promise<{ candidates: Candidate[]; stats: CollectStats }> {
+  const b = budget();
   const warnings: string[] = [];
   const stats: CollectStats = {
+    mode: hasGithubToken() ? "full" : "lite",
     fetched: { stars: 0, forks: 0, similarRepos: 0 },
     profiles: 0,
     dropped: { notAPerson: 0, lowSignal: 0, irrelevantRepos: 0 },
@@ -488,6 +627,7 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
   };
 
   // 1. Pull raw signals. Each source is optional; a failure becomes a warning, not a crash.
+  onStage?.("Reading stars, forks and similar projects");
   const [starsR, forksR, simR] = await Promise.allSettled([recentStars(p, warnings), forkPicks(p), similarRepos(p, warnings)]);
   const stars = starsR.status === "fulfilled" ? starsR.value : [];
   const forks = forksR.status === "fulfilled" ? forksR.value : { all: 0, picks: [] };
@@ -495,9 +635,7 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
   for (const r of [starsR, forksR, simR]) {
     if (r.status === "rejected") warnings.push(r.reason instanceof Error ? r.reason.message : "source failed");
   }
-  if ([starsR, forksR, simR].every((r) => r.status === "rejected")) {
-    throw (starsR as PromiseRejectedResult).reason;
-  }
+  if ([starsR, forksR, simR].every((r) => r.status === "rejected")) throw (starsR as PromiseRejectedResult).reason;
   stats.fetched = { stars: stars.length, forks: forks.all, similarRepos: sim.fetched };
   stats.dropped.irrelevantRepos = sim.irrelevant;
 
@@ -507,6 +645,7 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
   for (const f of forks.picks) logins.add(f.repo.owner.login);
   for (const s of sim.kept) logins.add(s.repo.owner.login);
   const list = [...logins];
+  onStage?.(`Reading ${list.length} profiles`);
   const settled = await pMap(list, 8, profile);
   if (list.length && settled.every((r) => r.status === "rejected")) throw (settled[0] as PromiseRejectedResult).reason;
   const profiles = new Map<string, GhUser>();
@@ -516,11 +655,11 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
   stats.profiles = profiles.size;
 
   // 3. Attach evidence to people. One person, many signals: starring AND forking stacks.
+  onStage?.("Ranking candidates");
   const people = new Map<string, Person>();
   const add = (login: string, ev: Ev) => {
     const u = profiles.get(login.toLowerCase());
-    if (!u) return;
-    if (u.type !== "User" && u.type !== "Organization") return;
+    if (!u || (u.type !== "User" && u.type !== "Organization")) return;
     const k = login.toLowerCase();
     const pr = people.get(k) ?? { login: u.login, u, ev: [], signal: 0 };
     pr.ev.push(ev);
@@ -534,6 +673,9 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
       text: `Starred ${p.owner}/${p.name} ${ago(s.at)}`,
       title: `Starred ${p.owner}/${p.name}`,
       url: `https://github.com/${s.login}`,
+      at: s.at,
+      rel: 0,
+      repoStars: 0,
     });
   }
   for (const f of forks.picks) {
@@ -545,25 +687,32 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
         : `Forked ${p.owner}/${p.name} ${ago(f.repo.created_at)} with no changes of their own`,
       title: `Forked ${p.owner}/${p.name}`,
       url: f.repo.html_url,
+      at: f.modified ? f.repo.pushed_at : f.repo.created_at,
+      rel: 0,
+      repoStars: 0,
     });
   }
   for (const s of sim.kept) {
     add(s.repo.owner.login, {
       kind: "similar",
       bonus: Math.min(15, s.rel * 2) + Math.min(5, Math.log10(s.repo.stargazers_count + 1) * 1.5),
-      text: `Maintains similar project ${s.repo.full_name}: ${s.repo.description ?? "no description"} (${s.repo.language ?? "n/a"}, ${s.repo.stargazers_count} stars, shared topics: ${s.shared.join(", ") || "none"}, last push ${ago(s.repo.pushed_at)})`,
+      text: `Maintains similar project ${s.repo.full_name}: ${cleanText(s.repo.description, 120) || "no description"} (${s.repo.language ?? "n/a"}, ${s.repo.stargazers_count} stars, shared topics: ${s.shared.join(", ") || "none"}, last push ${ago(s.repo.pushed_at)})`,
       title: `Maintains ${s.repo.full_name}`,
       url: s.repo.html_url,
+      at: s.repo.pushed_at,
+      rel: s.rel,
+      repoStars: s.repo.stargazers_count,
     });
   }
-  const droppedTypes = profiles.size - people.size;
-  stats.dropped.notAPerson = droppedTypes;
+  stats.dropped.notAPerson = profiles.size - people.size;
   for (const pr of people.values()) {
     pr.signal = Math.min(100, profileSignal(pr.u) + pr.ev.reduce((a, e) => a + e.bonus, 0));
   }
 
-  // 4. Turn people into candidates. Organizations stand alone; people sharing a company merge
-  //    into one strategic "company is paying attention" entity; everyone else is an individual.
+  // 4. Turn people into candidates.
+  //    Organizations stand alone. People who starred or forked and share a company merge into one
+  //    strategic "company is paying attention" entity. People who only maintain a similar project are
+  //    peers: they are joiners, never strategic just because their profile names an employer.
   const drafts: Draft[] = [];
   const byCompany = new Map<string, { label: string; members: Person[] }>();
   const solo: Person[] = [];
@@ -572,7 +721,8 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
       drafts.push(draftFor(pr, "strategic"));
       continue;
     }
-    const c = companyOf(pr.u.company);
+    const engaged = pr.ev.some((e) => e.kind !== "similar");
+    const c = engaged ? companyOf(pr.u.company) : null;
     if (!c) {
       solo.push(pr);
       continue;
@@ -585,7 +735,7 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
     g.members.sort((a, b) => b.signal - a.signal);
     const top = g.members[0];
     if (g.members.length >= COMPANY_MIN_PEOPLE && top.signal >= COMPANY_MIN_TOP_SIGNAL) {
-      const best = [...top.ev].sort((a, b) => b.bonus - a.bonus)[0];
+      const best = [...top.ev].sort((a, c) => c.bonus - a.bonus)[0];
       drafts.push({
         lane: "strategic",
         source: best.kind,
@@ -614,15 +764,18 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
   const chosen = compose(gated);
   for (const d of chosen) stats.composed[d.source]++;
 
-  // 6. Enrich only the survivors with recent repos (timing evidence for the scorer).
-  const targets = new Map<string, Person>();
-  for (const d of chosen) for (const pr of d.people.slice(0, 2)) targets.set(pr.login.toLowerCase(), pr);
-  const tl = [...targets.values()];
-  const repoRes = await pMap(tl, 8, (pr) => gh<GhRepo[]>(`/users/${pr.login}/repos?sort=pushed&per_page=5`));
+  // 6. Enrich only the survivors with recent repos (full mode only; lite mode saves the calls).
   const repos = new Map<string, GhRepo[]>();
-  repoRes.forEach((r, i) => {
-    if (r.status === "fulfilled") repos.set(tl[i].login.toLowerCase(), r.value);
-  });
+  if (b.enrich) {
+    onStage?.("Reading recent activity");
+    const targets = new Map<string, Person>();
+    for (const d of chosen) for (const pr of d.people.slice(0, 2)) targets.set(pr.login.toLowerCase(), pr);
+    const tl = [...targets.values()];
+    const repoRes = await pMap(tl, 8, (pr) => gh<GhRepo[]>(`/users/${pr.login}/repos?sort=pushed&per_page=5`));
+    repoRes.forEach((r, i) => {
+      if (r.status === "fulfilled") repos.set(tl[i].login.toLowerCase(), r.value);
+    });
+  }
 
   const candidates: Candidate[] = chosen.map((d) => {
     const shown = d.people.slice(0, d.label ? 4 : 1);
@@ -643,22 +796,8 @@ export async function collect(p: ProjectSummary): Promise<{ candidates: Candidat
       facts: lines.join("\n"),
       contact: contactOf(d.people[0].u),
       signal: Math.round(d.signal * 10) / 10,
+      meta: metaFor(d, repos.get(d.people[0].login.toLowerCase())),
     };
   });
   return { candidates, stats };
-}
-
-function draftFor(pr: Person, lane: Lane, company?: string): Draft {
-  const best = [...pr.ev].sort((a, b) => b.bonus - a.bonus)[0];
-  return {
-    lane,
-    source: best.kind,
-    key: `person:${pr.login.toLowerCase()}`,
-    handle: pr.login,
-    name: pr.u.name || pr.login,
-    title: company ? `${best.title}, works at ${company}` : best.title,
-    url: best.url,
-    signal: pr.signal,
-    people: [pr],
-  };
 }

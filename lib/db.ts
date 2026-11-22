@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   facts          TEXT NOT NULL,
   contact        TEXT NOT NULL DEFAULT '', -- public contact details only
   signal         REAL NOT NULL DEFAULT 0,  -- deterministic evidence strength, 0-100
+  meta           TEXT NOT NULL DEFAULT '{}', -- JSON facts used by the rule-based scorer
   UNIQUE (project_id, dedupe_key)
 );
 
@@ -62,7 +63,7 @@ function open(): Database.Database {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const d = new Database(file);
   const cols = d.prepare("PRAGMA table_info(candidates)").all() as { name: string }[];
-  if (cols.length && !cols.some((c) => c.name === "dedupe_key")) {
+  if (cols.length && !cols.some((c) => c.name === "meta")) {
     throw new Error(`The database at ${file} uses an older schema. Delete it (it only holds scan results) and run again.`);
   }
   d.pragma("journal_mode = WAL");

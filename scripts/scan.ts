@@ -3,8 +3,10 @@
 //   npm run scan -- github.com/owner/repo --dry           GitHub collection only: no Claude, no database
 //   npm run scan -- github.com/owner/repo --dry --verbose also print the full evidence given to Claude
 import { collect, fetchProject, parseRepo, type CollectStats } from "../lib/github";
+import { scoreCandidate } from "../lib/offline";
 
 function funnel(s: CollectStats) {
+  console.log(`Mode: ${s.mode} (${s.mode === "full" ? "GitHub token set" : "no GitHub token, reduced budget"})`);
   console.log(
     `Funnel: ${s.fetched.stars} recent stars, ${s.fetched.forks} forks, ${s.fetched.similarRepos} similar repos found -> ` +
       `${s.profiles} profiles read -> dropped ${s.dropped.irrelevantRepos} irrelevant repos, ` +
@@ -35,21 +37,26 @@ async function main() {
     const { candidates, stats } = await collect(project);
     funnel(stats);
     console.log("");
-    for (const c of candidates) {
+    let shown = 0;
+    for (const c of candidates.map((x) => ({ ...x, r: scoreCandidate(x) })).sort((a, b) => b.r.score - a.r.score)) {
       const who = c.name === c.handle ? c.name : `${c.name} (@${c.handle})`;
-      console.log(`[${c.lane}/${c.source}] evidence ${c.signal}  ${who}`);
+      const visible = c.r.score >= 75;
+      if (visible) shown++;
+      console.log(`${visible ? "SHOWN " : "hidden"} ${c.r.score}  [${c.lane}/${c.source}] ${who}  (sig ${c.r.significance} / res ${c.r.resonance} / tim ${c.r.timing}, evidence ${c.signal})`);
       console.log(`    ${c.artifact_title}`);
+      console.log(`    why: ${c.r.why}`);
       console.log(`    ${c.artifact_url}`);
       if (c.contact) console.log(`    contact: ${c.contact}`);
       if (verbose) console.log(c.facts.split("\n").map((l) => `      | ${l}`).join("\n"));
     }
-    console.log(`\n${candidates.length} candidates ready for scoring (not scored in --dry mode).`);
+    console.log(`\n${candidates.length} candidates, ${shown} score 75 or higher and appear in the feed. Scores are rule-based (no AI key needed).`);
     return;
   }
 
   const { runScan } = await import("../lib/pipeline");
   const r = await runScan(repo);
   funnel(r.stats);
+  console.log(`Scorer: ${r.scorer === "claude" ? "Claude" : "rule-based (no ANTHROPIC_API_KEY set)"}`);
   console.log(`Newly scored ${r.scored}, hidden below cutoff ${r.hiddenBelowCutoff}\n`);
   for (const m of r.matches) {
     console.log(`${m.score}  [${m.lane}/${m.source}] ${m.name} (@${m.handle})  evidence ${m.signal}`);

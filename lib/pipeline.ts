@@ -1,6 +1,8 @@
 import { db, type Lane } from "./db";
 import { collect, fetchProject, parseRepo, type ProjectSummary } from "./github";
-import { draftOutreach, scoreBatch, type ScoreInput } from "./claude";
+import { draftOutreach, hasClaude, scoreBatch, type ScoreInput } from "./claude";
+import { draftEmail, scoreCandidate } from "./offline";
+import type { CandidateMeta } from "./github";
 
 export const CUTOFF = 75;
 const BATCH = 10;
@@ -55,16 +57,16 @@ export async function runScan(repoUrl: string) {
   const { candidates, stats } = await collect(summary);
   const insert = db.prepare(
     `INSERT INTO candidates
-       (project_id, lane, source, dedupe_key, handle, name, artifact_title, artifact_url, facts, contact, signal)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (project_id, lane, source, dedupe_key, handle, name, artifact_title, artifact_url, facts, contact, signal, meta)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(project_id, dedupe_key) DO UPDATE SET
        lane = excluded.lane, source = excluded.source, name = excluded.name,
        artifact_title = excluded.artifact_title, artifact_url = excluded.artifact_url,
-       facts = excluded.facts, contact = excluded.contact, signal = excluded.signal`
+       facts = excluded.facts, contact = excluded.contact, signal = excluded.signal, meta = excluded.meta`
   );
   db.transaction(() => {
     for (const c of candidates) {
-      insert.run(project.id, c.lane, c.source, c.dedupe_key, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, c.contact, c.signal);
+      insert.run(project.id, c.lane, c.source, c.dedupe_key, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, c.contact, c.signal, JSON.stringify(c.meta));
     }
   })();
 
@@ -73,11 +75,11 @@ export async function runScan(repoUrl: string) {
   // to control cost on rescans.
   const unscored = db
     .prepare(
-      `SELECT c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts
+      `SELECT c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, c.contact, c.meta
        FROM candidates c LEFT JOIN matches m ON m.candidate_id = c.id
        WHERE c.project_id = ? AND (m.id IS NULL OR c.signal - m.signal_at_score >= ?)`
     )
-    .all(project.id, RESCORE_DELTA) as ScoreInput[];
+    .all(project.id, RESCORE_DELTA) as (ScoreInput & { contact: string; meta: string })[];
   const signalOf = new Map(unscored.map((c) => [c.id, c.signal]));
 
   const save = db.prepare(
@@ -89,14 +91,18 @@ export async function runScan(repoUrl: string) {
   );
   let scored = 0;
   for (let i = 0; i < unscored.length; i += BATCH) {
-    const scores = await scoreBatch(summary, unscored.slice(i, i + BATCH));
+    const batch = unscored.slice(i, i + BATCH);
+    // Claude when a key exists; otherwise the deterministic rule-based scorer.
+    const scores = hasClaude()
+      ? await scoreBatch(summary, batch)
+      : batch.map((c) => ({ id: c.id, ...scoreCandidate({ ...c, meta: JSON.parse(c.meta) as CandidateMeta }) }));
     db.transaction(() => {
       for (const s of scores) save.run(s.id, s.significance, s.resonance, s.timing, s.score, s.why, signalOf.get(s.id) ?? 0);
     })();
     scored += scores.length;
   }
 
-  return { projectId: project.id, collected: candidates.length, scored, stats, ...listMatches(project.id) };
+  return { projectId: project.id, scorer: hasClaude() ? "claude" : "rules", collected: candidates.length, scored, stats, ...listMatches(project.id) };
 }
 
 function laneBias(projectId: number): Record<string, number> {
@@ -143,15 +149,17 @@ export function listMatches(projectId: number) {
 export async function outreachFor(matchId: number): Promise<string> {
   const row = db
     .prepare(
-      `SELECT m.why, c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, p.summary
+      `SELECT m.why, c.id, c.lane, c.source, c.signal, c.handle, c.name, c.artifact_title, c.artifact_url, c.facts, c.contact, c.meta, p.summary
        FROM matches m
        JOIN candidates c ON c.id = m.candidate_id
        JOIN projects p ON p.id = c.project_id
        WHERE m.id = ?`
     )
-    .get(matchId) as (ScoreInput & { why: string; summary: string }) | undefined;
+    .get(matchId) as (ScoreInput & { why: string; summary: string; contact: string; meta: string }) | undefined;
   if (!row) throw new Error("Match not found.");
-  return draftOutreach(JSON.parse(row.summary) as ProjectSummary, row, row.why);
+  const project = JSON.parse(row.summary) as ProjectSummary;
+  if (!hasClaude()) return draftEmail(project, { ...row, meta: JSON.parse(row.meta) as CandidateMeta });
+  return draftOutreach(project, row, row.why);
 }
 
 export function recordFeedback(matchId: number, action: "like" | "dismiss", reason?: string) {

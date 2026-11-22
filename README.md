@@ -4,6 +4,19 @@ Attention radar for developer-tool founders. Paste a GitHub repo, get scored peo
 
 Next.js 15 route handlers, SQLite (better-sqlite3), GitHub REST API, Anthropic SDK. `index.html` is the clickable UI prototype (v1).
 
+## Use it from a phone (no server, no paid keys)
+
+`index.html` is the working app. It is your prototype, unchanged in markup and styling, running the real scan in the browser. It calls GitHub directly and scores with built-in rules, so it needs no server and no Anthropic key.
+
+1. In the repo go to **Settings > Pages**, choose **Deploy from a branch**, branch `main`, folder `/ (root)`, and save.
+2. Open `https://<your-username>.github.io/Team-Cleone/`.
+3. Type a repo such as `owner/repo` into the bar and tap send. The collisions appear in the feed.
+4. Without a GitHub token the scan runs in a reduced mode (GitHub allows 60 calls an hour to anonymous callers, and shared mobile networks often use them up). To get full scans, create a **fine-grained token with public-repository read access only**, paste it into the same bar and tap send. It is saved on your device only.
+
+Scores, reasons and outreach drafts are rule-based and use only public facts, so nothing is made up and the results are repeatable. They are not AI judgement. With an `ANTHROPIC_API_KEY` the Node backend scores with Claude instead.
+
+To rebuild `index.html` after changing the engine in `lib/` or the screens in `web/app.js`, run `npm run build:web`.
+
 ## Run it
 
 Needs Node 20.6 or newer.
@@ -11,10 +24,10 @@ Needs Node 20.6 or newer.
     npm install
     cp .env.example .env.local     # then fill in ANTHROPIC_API_KEY and GITHUB_TOKEN
     npm run scan -- github.com/owner/repo --dry   # GitHub collection only, no API key needed for Claude
-    npm run scan -- github.com/owner/repo         # full scan with Claude scoring
+    npm run scan -- github.com/owner/repo         # full scan (Claude scoring if ANTHROPIC_API_KEY is set, rules otherwise)
     npm run dev                                    # API on http://localhost:3000
 
-`GITHUB_TOKEN` can be a read-only token. A scan makes roughly 100-150 GitHub calls; without a token GitHub allows only 60 an hour.
+`ANTHROPIC_API_KEY` is optional. `GITHUB_TOKEN` can be a read-only token. A scan makes roughly 100-150 GitHub calls; without a token GitHub allows only 60 an hour.
 Add `--verbose` to a dry run to see the exact evidence Claude will receive.
 
 ## API
