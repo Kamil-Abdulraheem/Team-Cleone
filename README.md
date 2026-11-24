@@ -2,49 +2,43 @@
 
 Cleone shows founders of developer tools and open-source projects **who is paying attention to their project**, scored, with a drafted message for each. You paste a GitHub repo; it reads public GitHub activity (recent stars, forks, similar projects) and returns people and companies in three lanes: **Partners and acquirers**, **Joiners**, **Investors**.
 
-Plain HTML, CSS and JavaScript. No build step, no framework, no TypeScript.
+Plain HTML, CSS and JavaScript. No build step, no framework, no TypeScript. It runs on **Vercel** with a **Neon** (PostgreSQL) database.
 
 | Part | Where | What it is |
 |---|---|---|
 | Screens | `public/index.html`, `public/app.js` | The prototype's look, plus login, settings and plan screens |
-| Backend | `functions/_lib/app.js` | Every API route, one short handler each |
-| Scan engine | `functions/_lib/engine.js` | Reads GitHub, split into small steps |
-| Scoring and drafts | `functions/_lib/score.js` | Rule-based scores, outreach text, the paywall ranking |
-| Numbers you may want to change | `functions/_lib/config.js`, top of `engine.js` | Plan limits, cutoff, strictness |
-| Database | `schema.sql` (copied to `functions/_lib/schema.js`) | SQLite: 11 small tables |
-| Vercel entry | `api/[...path].js`, `vercel.json` | Runs the backend on Vercel |
-| Cloudflare entry | `functions/api/[[path]].js` | Runs the same backend on Cloudflare Pages |
-
-The backend is the same on both hosts, so you can start on one and move to the other later without rewriting anything.
+| Backend | `lib/app.js` | Every API route, one short handler each |
+| Scan engine | `lib/engine.js` | Reads GitHub, split into small steps |
+| Scoring and drafts | `lib/score.js` | Rule-based scores, outreach text, the paywall ranking |
+| Numbers you may want to change | `lib/config.js`, top of `lib/engine.js` | Plan limits, cutoff, strictness |
+| Database | `schema.sql`, `lib/postgres.js` | 11 small tables. The app creates them by itself |
+| Vercel entry | `api/[...path].js`, `vercel.json` | Starts the backend on Vercel |
 
 ---
 
-## Put it online on Vercel (works from a phone browser)
+## Put it online (works from a phone browser)
 
-**A note on cost.** Vercel's free *Hobby* plan is for personal, non-commercial projects. Building and testing on it is fine. Once you charge customers, Vercel's terms require the *Pro* plan (about $20 a month). Cloudflare's free plan allows commercial use, so you can move there later (see the end of this section). Turso, the database, has a free plan that is enough to start.
+**A note on cost.** Vercel's free *Hobby* plan is for personal, non-commercial projects. Building and testing on it is fine. Once you charge customers, Vercel's terms require the *Pro* plan (about $20 a month). Neon has a free plan that is enough to start. The free Neon database goes to sleep when idle, so the first request after a quiet spell can take a few seconds.
 
-**1. Create the database (Turso).** Go to turso.tech and sign up with GitHub. Create a database named `cleone`. Pick the **Frankfurt** location (it sits next to the Vercel region set in `vercel.json`). Open the database and copy two things: its **URL** (starts with `libsql://`) and a **token** (create one from the database page; the dashboard wording may change). You do not need to create any tables. The app creates them itself the first time it runs.
+**1. Create the site.** Go to vercel.com and sign up with GitHub. *Add New > Project*, import `Team-Cleone`. Leave all settings as they are (they come from `vercel.json`). Do not press Deploy yet.
 
-**2. Create the site (Vercel).** Go to vercel.com and sign up with GitHub. *Add New > Project*, import `Team-Cleone`. Leave everything as it is (the settings are in `vercel.json`). Before you press Deploy, open **Environment Variables** and add:
+**2. Create the database (Neon).** Two ways, pick one:
+
+- *Easiest:* after the project exists, open it and go to the **Storage** tab, choose **Create Database**, pick **Neon**, and follow the prompts. Vercel adds a variable called `DATABASE_URL` for you.
+- *Or by hand:* sign up at neon.com, create a project (choose the **AWS US East (N. Virginia)** region, which sits next to Vercel's default), copy its **pooled connection string**, and add it in Vercel as a variable named `DATABASE_URL`.
+
+You do not need to create any tables. The app creates them the first time it runs.
+
+**3. Add the other variables.** In Vercel: *Project > Settings > Environment Variables*:
 
 | Name | Value |
 |---|---|
-| `TURSO_DATABASE_URL` | the `libsql://...` URL from step 1 |
-| `TURSO_AUTH_TOKEN` | the token from step 1 |
-| `GITHUB_TOKEN` | a GitHub token (see step 3) |
-| `ADMIN_EMAILS` | your email, so you get Pro for testing |
+| `GITHUB_TOKEN` | A GitHub token (see below). Required |
+| `ADMIN_EMAILS` | Your email, so you get Pro for testing |
 
-Press **Deploy**. When it finishes, open the link.
+The GitHub token: create it at github.com/settings/personal-access-tokens as a fine-grained token with **public repositories, read-only** and nothing else. Without it GitHub allows only 60 calls an hour, shared with strangers, and scans fail.
 
-**3. The GitHub token (required).** Create it at github.com/settings/personal-access-tokens: fine-grained, **public repositories, read-only**, nothing else. Without it GitHub allows only 60 calls an hour, shared with strangers, and scans fail.
-
-**4. Use it.** Open your site, create an account with the email you put in `ADMIN_EMAILS`, paste a repo. If something is wrong, the app tells you (for example "The database is not connected").
-
-Changing a variable later: *Project > Settings > Environment Variables*, then *Deployments > Redeploy*.
-
-### Or on Cloudflare Pages + D1 (free, commercial use allowed)
-
-Create a Pages project from this repo with framework **None**, build command empty, output directory **`public`**. Create a D1 database named `cleone`, paste `schema.sql` into its Console, and bind it to the project as **`DB`** (Settings > Bindings). Add `GITHUB_TOKEN` and `ADMIN_EMAILS` as variables. Redeploy.
+**4. Deploy.** Press **Deploy** (or *Deployments > Redeploy* if you already did). Open the link, create an account with the email you put in `ADMIN_EMAILS`, and paste a repo. If something is wrong the app says so, for example "The database is not connected".
 
 ### Optional extras (each switches on one feature)
 
@@ -60,13 +54,13 @@ Create a Pages project from this repo with framework **None**, build command emp
 
 Live: accounts (email and password), Free and Pro plans, the paywall, scans, scoring, outreach drafts, Useful/Dismiss feedback, settings, data export, account deletion, billing through Paystack once you add the keys.
 
-Not built yet: weekly email alerts (the setting is saved, nothing is sent), email verification at signup, sign-in with Google, Anthropic billing for you. Password reset needs the Resend variables.
+Not built yet: weekly email alerts (the setting is saved, nothing is sent), email verification at signup, sign-in with Google. Password reset needs the Resend variables.
 
 ## How scores work (and how to check them)
 
 Scores are **rule-based**, from public facts only, so they are repeatable and never invent anything. They are not AI judgement. They are a first calibration: nobody has yet checked them against who actually replies.
 
-That check is built in. When you copy an outreach draft, it goes into *Settings > Outreach log*. Mark who replied. The log shows the reply rate for each score band (75 to 79, 80 to 89, 90 and up). If higher scores do not get more replies, change the formulas in `functions/_lib/score.js`.
+That check is built in. When you copy an outreach draft, it goes into *Settings > Outreach log*. Mark who replied. The log shows the reply rate for each score band (75 to 79, 80 to 89, 90 and up). If higher scores do not get more replies, change the formulas in `lib/score.js`.
 
 ## The paywall is real
 
@@ -83,4 +77,4 @@ This prints the matches and how many GitHub calls each step used. The *Actions >
 
     npm test
 
-Runs the backend against an in-memory database and the real page in a simulated browser. It also fakes GitHub, Paystack, Resend and Anthropic, so it costs nothing and needs no keys.
+Needs nothing installed. It runs the backend against a real PostgreSQL that runs inside Node (PGlite), and the real page in a simulated browser. It fakes GitHub, Paystack, Resend and Anthropic, so it costs nothing and needs no keys. To test against a real PostgreSQL server instead, run `TEST_DATABASE_URL=postgres://user:pass@localhost/dbname npm test`.

@@ -1,9 +1,9 @@
-// Calls the real backend exactly like Cloudflare would, with a fake database and a fake GitHub.
-import { makeD1 } from "./d1.js";
+// Calls the real backend exactly like Vercel would, with a test database and a fake GitHub.
+import { makeTestDb } from "./db.js";
 import { mockGithub } from "./mockgithub.js";
-import { onRequest } from "../functions/api/[[path]].js";
+import { handle } from "../lib/app.js";
 
-export function makeApp(extraEnv = {}) {
+export async function makeApp(extraEnv = {}) {
   const gh = mockGithub();
   const realFetch = globalThis.fetch;
   const handlers = [];
@@ -14,7 +14,8 @@ export function makeApp(extraEnv = {}) {
     for (const h of handlers) { const r = await h(u, init); if (r) return r; }
     throw new Error(`Unexpected outside call to ${u}`);
   };
-  const env = { DB: makeD1(), GITHUB_TOKEN: "test-token", ...extraEnv };
+  const T = await makeTestDb();
+  const env = { DB: T.DB, GITHUB_TOKEN: "test-token", ...extraEnv };
   const jars = new Map();
   async function call(method, path, { body, as = "a", headers = {}, raw } = {}) {
     const jar = jars.get(as) || { cookie: "" };
@@ -24,14 +25,23 @@ export function makeApp(extraEnv = {}) {
     const init = { method, headers: h };
     if (raw !== undefined) init.body = raw;
     else if (body !== undefined) { init.body = JSON.stringify(body); h["content-type"] = "application/json"; }
-    const res = await onRequest({ request: new Request(`https://app.test/api${path}`, init), env });
+    const res = await handle(new Request(`https://app.test/api${path}`, init), env);
     const sc = res.headers.get("set-cookie");
     if (sc) jar.cookie = /Max-Age=0/.test(sc) ? "" : sc.split(";")[0];
     const text = await res.text();
     let data; try { data = JSON.parse(text); } catch { data = text; }
     return { status: res.status, data, text };
   }
-  return { call, env, gh, onOutside: (h) => handlers.unshift(h), restore: () => (globalThis.fetch = realFetch), jars };
+  // Direct database helpers for checking what was stored.
+  const rows = async (sql, ...a) => (await env.DB.prepare(sql).bind(...a).all()).results;
+  return {
+    call, env, gh, jars, dbKind: T.kind,
+    onOutside: (h) => handlers.unshift(h),
+    all: rows,
+    one: async (sql, ...a) => (await rows(sql, ...a))[0] ?? null,
+    run: (sql, ...a) => env.DB.prepare(sql).bind(...a).run(),
+    restore: async () => { globalThis.fetch = realFetch; await T.close(); },
+  };
 }
 
 export async function runScan(app, repo, as = "a", maxSteps = 30) {

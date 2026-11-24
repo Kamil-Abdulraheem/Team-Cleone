@@ -3,9 +3,9 @@
 //   node scripts/scan.mjs owner/repo --verbose    also prints the evidence behind each match
 // Set GITHUB_TOKEN to use the full budget. Without it the smaller budget fits GitHub's anonymous limit.
 // In the GitHub Actions button ("Scan a repo") the token is provided automatically.
-import { finishCandidates, makeGithub, stepEnrich, stepProfiles, stepRank, stepRepo, stepSignals } from "../functions/_lib/engine.js";
-import { CUTOFF } from "../functions/_lib/config.js";
-import { scoreCandidate } from "../functions/_lib/score.js";
+import { finishCandidates, makeGithub, stepEnrich, stepProfiles, stepRank, stepRepo, stepSignals } from "../lib/engine.js";
+import { CUTOFF } from "../lib/config.js";
+import { scoreCandidate } from "../lib/score.js";
 
 const args = process.argv.slice(2);
 const verbose = args.includes("--verbose");
@@ -27,7 +27,7 @@ try {
   console.log(`Project: ${p.owner}/${p.name} (${p.language ?? "n/a"}, ${p.stars} stars)  topics: ${p.topics.join(", ") || "none"}`);
   console.log(`Mode: ${s.mode}`);
   console.log(`Funnel: ${s.fetched.stars} recent stars, ${s.fetched.forks} forks, ${s.fetched.similarRepos} similar repos -> ${s.profiles} profiles -> dropped ${s.dropped.irrelevantRepos} off-topic repos, ${s.dropped.notAPerson} non-person, ${s.dropped.lowSignal} low-evidence -> ${s.companies} companies -> kept ${s.composed.star} star / ${s.composed.fork} fork / ${s.composed.similar} similar`);
-  console.log(`GitHub calls per step: ${perStep.map(([n, c]) => `${n}=${c}`).join(" ")}  (Cloudflare's free limit is 50 per step; max here ${Math.max(...perStep.map((x) => x[1]))})`);
+  console.log(`GitHub calls per step: ${perStep.map(([n, c]) => `${n}=${c}`).join(" ")}  (each step is kept small; max here ${Math.max(...perStep.map((x) => x[1]))})`);
   for (const w of s.warnings) console.log(`Warning: ${w}`);
   console.log("");
   const rows = finishCandidates(state).map((c) => ({ ...c, r: scoreCandidate(c) })).sort((a, b) => b.r.score - a.r.score);

@@ -2,7 +2,7 @@
 import { JSDOM } from "jsdom";
 import fs from "node:fs";
 import { makeApp } from "./harness.js";
-import { onRequest } from "../functions/api/[[path]].js";
+import { handle } from "../lib/app.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = "") => { cond ? pass++ : fail++; console.log(`${cond ? "PASS" : "FAIL"} ${name}${!cond && extra ? "  -> " + extra : ""}`); };
@@ -17,7 +17,7 @@ async function browser(app, search = "") {
       w.fetch = async (url, init = {}) => {
         const headers = { origin: "https://app.test", "cf-connecting-ip": "9.9.9.9", ...(init.headers || {}) };
         if (jar.cookie) headers.cookie = jar.cookie;
-        const res = await onRequest({ request: new Request("https://app.test" + url, { method: init.method || "GET", headers, body: init.body }), env: app.env });
+        const res = await handle(new Request("https://app.test" + url, { method: init.method || "GET", headers, body: init.body }), app.env);
         const sc = res.headers.get("set-cookie"); if (sc) jar.cookie = /Max-Age=0/.test(sc) ? "" : sc.split(";")[0];
         return res;
       };
@@ -30,7 +30,7 @@ async function browser(app, search = "") {
 }
 
 // ============================================================ logged out
-let app = makeApp();
+let app = await makeApp();
 let b = await browser(app);
 await wait(() => b.q(".home h1")?.textContent === "Welcome back");
 ok("logged-out visitors see the log-in screen", b.q(".home h1")?.textContent === "Welcome back");
@@ -138,11 +138,11 @@ await wait(() => b.q("#de")?.textContent);
 ok("delete needs the right password", /wrong/.test(b.q("#de").textContent));
 b.type("#dp", "a brand new password"); b.click("#dy");
 await wait(() => b.q(".home h1")?.textContent === "Create your account");
-ok("delete removes the account and returns to sign-up", b.q(".home h1")?.textContent === "Create your account" && !app.env.DB.raw.prepare("SELECT 1 FROM users").get());
-app.restore();
+ok("delete removes the account and returns to sign-up", b.q(".home h1")?.textContent === "Create your account" && !(await app.one("SELECT 1 AS x FROM users")));
+await app.restore();
 
 // ============================================================ Pro and payments-on variants
-app = makeApp({ ADMIN_EMAILS: "boss@cleone.app", PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
+app = await makeApp({ ADMIN_EMAILS: "boss@cleone.app", PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#nm", "Boss"); b.type("#em", "boss@cleone.app"); b.type("#pw", "correct horse battery"); b.click("#ok");
@@ -155,23 +155,23 @@ await wait(() => b.q(".tabs button.on")?.textContent === "Joiners");
 ok("Pro: all matches are open and nothing is blurred", b.qa(".card:not(.lock)").length > 3 && b.qa(".card.lock").length === 0 && !/1 match per lane/.test(b.q(".note").textContent));
 b.click(".me"); await wait(() => b.q("#panel .row"));
 ok("Pro menu has no Upgrade entry", b.qa("#panel .row").map((x) => x.textContent.trim()).join("|") === "Settings|Log out");
-app.restore();
+await app.restore();
 
-app = makeApp({ PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
+app = await makeApp({ PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#em", "free@user.com"); b.type("#pw", "correct horse battery"); b.click("#ok");
 await wait(() => b.q(".home h1")?.textContent === "Ready when you are.");
 b.click("#upg");
 ok("payments on: the plan page offers Upgrade to Pro instead of the waitlist", !!b.q("#up2") && !b.q("#jn"));
-app.restore();
+await app.restore();
 
 // reset link in the address bar
-app = makeApp();
+app = await makeApp();
 b = await browser(app, "?reset=abc");
 await wait(() => b.q("h2"));
 ok("a reset link opens the choose-a-new-password screen", /Choose a new password/.test(b.q("h2").textContent));
-app.restore();
+await app.restore();
 
 console.log(`\napp.test.js: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

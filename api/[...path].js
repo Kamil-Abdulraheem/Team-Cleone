@@ -1,6 +1,6 @@
-// Vercel entry point. All /api/... requests arrive here. The logic is in functions/_lib/app.js.
-import { createNodeHandler } from "../functions/_lib/node.js";
-import { getDb } from "../functions/_lib/libsql.js";
+// Vercel entry point. All /api/... requests arrive here. The logic is in lib/app.js.
+import { createNodeHandler } from "../lib/node.js";
+import { getDb } from "../lib/postgres.js";
 
 let cached = null; // the settings plus the database, built once per running instance
 
@@ -8,7 +8,7 @@ async function getEnv() {
   if (cached) return cached;
   let DB = null;
   try {
-    DB = await getDb(process.env); // null when TURSO_DATABASE_URL is not set
+    DB = await getDb(process.env); // null when DATABASE_URL is not set
   } catch (e) {
     console.error("Could not connect to the database:", e.message);
   }

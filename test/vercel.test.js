@@ -1,13 +1,13 @@
 // Runs the Vercel wrapper inside a real HTTP server, to prove the Node <-> web conversion is right.
 import http from "node:http";
-import { createNodeHandler } from "../functions/_lib/node.js";
+import { createNodeHandler } from "../lib/node.js";
 import { makeApp } from "./harness.js";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = "") => { cond ? pass++ : fail++; console.log(`${cond ? "PASS" : "FAIL"} ${name}${!cond && extra ? "  -> " + extra : ""}`); };
 const KEY = "sk_test_secret";
 const realFetch = globalThis.fetch; // the harness replaces fetch for outside calls; the client below needs the real one
-const app = makeApp({ PAYSTACK_SECRET_KEY: KEY, PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
+const app = await makeApp({ PAYSTACK_SECRET_KEY: KEY, PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
 const server = http.createServer(createNodeHandler(async () => app.env)).listen(0);
 await new Promise((r) => server.once("listening", r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -53,6 +53,6 @@ r = await call("POST", "/api/auth/logout", undefined, { cookie: session });
 ok("logout clears the cookie", /Max-Age=0/.test(r.headers.get("set-cookie") || ""));
 
 server.close();
-app.restore();
+await app.restore();
 console.log(`\nvercel.test.js: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

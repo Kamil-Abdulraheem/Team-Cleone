@@ -3,20 +3,20 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Cleone: who is paying attention to your open-source project. Plain HTML, CSS and JavaScript. Runs on Vercel + Turso or Cloudflare Pages + D1.",
+  "description": "Cleone: who is paying attention to your open-source project. Plain HTML, CSS and JavaScript. Runs on Vercel with a Neon (PostgreSQL) database.",
   "scripts": {
     "scan": "node scripts/scan.mjs",
     "test": "node test/run.mjs",
     "schema": "node scripts/make-schema.mjs"
   },
   "devDependencies": {
-    "better-sqlite3": "^12.0.0",
+    "@electric-sql/pglite": "^0.6.0",
     "jsdom": "^26.0.0"
-  },
-  "dependencies": {
-    "@libsql/client": "^0.18.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }

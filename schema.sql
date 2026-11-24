@@ -1,5 +1,5 @@
--- Cleone database (Cloudflare D1, which is SQLite). Safe to run more than once.
--- Paste this whole file into the D1 console once, after creating the database.
+-- Cleone database (PostgreSQL, hosted on Neon). Safe to run more than once.
+-- The app runs this by itself the first time it starts, so you normally never touch this file.
 
 CREATE TABLE IF NOT EXISTS users (
   id          TEXT PRIMARY KEY,
@@ -8,14 +8,14 @@ CREATE TABLE IF NOT EXISTS users (
   pw_hash     TEXT NOT NULL,
   pw_salt     TEXT NOT NULL,
   prefs       TEXT NOT NULL DEFAULT '{}',      -- JSON: theme, weekly alerts
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL                  -- seconds since 1970
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   id          TEXT PRIMARY KEY,                -- SHA-256 of the cookie value (the cookie itself is never stored)
   user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at  INTEGER NOT NULL,
-  expires_at  INTEGER NOT NULL,
+  created_at  BIGINT NOT NULL,
+  expires_at  BIGINT NOT NULL,
   ip          TEXT,
   agent       TEXT
 );
@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   customer_code      TEXT,
   subscription_code  TEXT,
   status             TEXT NOT NULL,            -- active | cancelled | past_due
-  current_period_end INTEGER,                  -- Pro lasts until this time
-  updated_at         INTEGER NOT NULL
+  current_period_end BIGINT,                   -- Pro lasts until this time
+  updated_at         BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS scans (
@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS scans (
   state       TEXT NOT NULL DEFAULT '{}',      -- JSON progress, cleared when the scan finishes
   error       TEXT,
   scorer      TEXT,                            -- rules | claude
-  created_at  INTEGER NOT NULL,
-  finished_at INTEGER
+  created_at  BIGINT NOT NULL,                 -- seconds
+  finished_at BIGINT                           -- milliseconds, so two scans finishing in one second still sort correctly
 );
 CREATE INDEX IF NOT EXISTS idx_scans_user ON scans(user_id, created_at);
 
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS matches (
   kind        TEXT NOT NULL,
   sig_text    TEXT NOT NULL,                   -- the blue "public signal" line
   url         TEXT NOT NULL,
-  score       REAL NOT NULL,
+  score       DOUBLE PRECISION NOT NULL,
   sig         INTEGER NOT NULL,
   res         INTEGER NOT NULL,
   tim         INTEGER NOT NULL,
@@ -64,12 +64,12 @@ CREATE TABLE IF NOT EXISTS matches (
   contact     TEXT NOT NULL DEFAULT '',        -- public contact details only
   meta        TEXT NOT NULL DEFAULT '{}',
   scan_id     TEXT,
-  updated_at  INTEGER NOT NULL,
+  updated_at  BIGINT NOT NULL,
   UNIQUE (user_id, repo, k)
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          BIGSERIAL PRIMARY KEY,
   user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   repo        TEXT NOT NULL,
   k           TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   source      TEXT NOT NULL DEFAULT '',
   action      TEXT NOT NULL,                   -- like | dismiss
   reason      TEXT,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id, repo);
 
@@ -88,10 +88,10 @@ CREATE TABLE IF NOT EXISTS outreach (
   k           TEXT NOT NULL,
   name        TEXT NOT NULL,
   lane        TEXT NOT NULL,
-  score       REAL NOT NULL,
-  created_at  INTEGER NOT NULL,
+  score       DOUBLE PRECISION NOT NULL,
+  created_at  BIGINT NOT NULL,
   replied     INTEGER NOT NULL DEFAULT 0,      -- the user marks this; it is how scores get checked against reality
-  replied_at  INTEGER
+  replied_at  BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_outreach_user ON outreach(user_id, created_at);
 
@@ -105,16 +105,16 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE TABLE IF NOT EXISTS password_resets (
   token_hash  TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at  INTEGER NOT NULL
+  expires_at  BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS throttle (
   key          TEXT PRIMARY KEY,
-  window_start INTEGER NOT NULL,
+  window_start BIGINT NOT NULL,
   count        INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS waitlist (
   email       TEXT PRIMARY KEY,
-  created_at  INTEGER NOT NULL
+  created_at  BIGINT NOT NULL
 );

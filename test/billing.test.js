@@ -11,18 +11,18 @@ const hmac = async (body) => {
 };
 
 // ---------------------------------------------------------------- payments switched OFF
-let app = makeApp();
+let app = await makeApp();
 await app.call("POST", "/auth/signup", { body: { email: "ada@startup.com", password: PW } });
 let r = await app.call("POST", "/billing/checkout");
 ok("checkout says payments are off when keys are missing", r.status === 503 && /not switched on/.test(r.data.error));
 r = await app.call("POST", "/waitlist", { body: { email: "wait@list.com" } });
-ok("waitlist works while payments are off", r.status === 200 && !!app.env.DB.raw.prepare("SELECT 1 FROM waitlist WHERE email='wait@list.com'").get());
+ok("waitlist works while payments are off", r.status === 200 && !!(await app.one("SELECT 1 AS x FROM waitlist WHERE email='wait@list.com'")));
 r = await app.call("POST", "/billing/webhook", { raw: "{}" , headers: { "x-paystack-signature": "abc" } });
 ok("webhook is refused when payments are off", r.status === 401);
-app.restore();
+await app.restore();
 
 // ---------------------------------------------------------------- payments ON (Paystack stubbed)
-app = makeApp({ PAYSTACK_SECRET_KEY: KEY, PRO_AMOUNT: "1900000", PRO_CURRENCY: "NGN", PAYSTACK_PLAN_CODE: "PLN_test" });
+app = await makeApp({ PAYSTACK_SECRET_KEY: KEY, PRO_AMOUNT: "1900000", PRO_CURRENCY: "NGN", PAYSTACK_PLAN_CODE: "PLN_test" });
 let seenInit = null;
 app.onOutside(async (u, init) => {
   if (u.endsWith("/transaction/initialize")) { seenInit = JSON.parse(init.body); return Response.json({ status: true, data: { authorization_url: "https://checkout.paystack.com/abc", reference: "ref1" } }); }
@@ -84,17 +84,17 @@ const cancel = JSON.stringify({ event: "subscription.disable", data: { subscript
 r = await app.call("POST", "/billing/webhook", { raw: cancel, headers: { "x-paystack-signature": await hmac(cancel) } });
 r = await app.call("GET", "/me");
 ok("after cancelling, Pro continues until the paid period ends", r.data.plan === "pro" && r.data.subscription.status === "cancelled");
-app.env.DB.raw.prepare("UPDATE subscriptions SET current_period_end = ? WHERE user_id = ?").run(Math.floor(Date.now() / 1000) - 10, app.userId);
+await app.run("UPDATE subscriptions SET current_period_end = ? WHERE user_id = ?", Math.floor(Date.now() / 1000) - 10, app.userId);
 r = await app.call("GET", "/me");
 ok("once the period has ended the account falls back to Free", r.data.plan === "free");
 r = await app.call("GET", "/radar");
 ok("and locked results are locked again", r.data.lanes.joiners.locked.length > 0 && r.data.lanes.joiners.items.length <= 1);
 r = await app.call("DELETE", "/me", { body: { password: PW } });
 ok("a cancelled, expired account can be deleted", r.status === 200);
-app.restore();
+await app.restore();
 
 // ---------------------------------------------------------------- admin and Claude
-app = makeApp({ ADMIN_EMAILS: "owner@cleone.app", ANTHROPIC_API_KEY: "sk-ant-test" });
+app = await makeApp({ ADMIN_EMAILS: "owner@cleone.app", ANTHROPIC_API_KEY: "sk-ant-test" });
 let claudeCalls = 0, claudeMode = "ok";
 app.onOutside(async (u, init) => {
   if (!u.includes("api.anthropic.com")) return null;
@@ -108,22 +108,22 @@ r = await app.call("GET", "/config");
 ok("config reports Claude when a key is set", r.data.scorer === "claude");
 await app.call("POST", "/auth/signup", { body: { email: "ada@startup.com", password: PW } });
 await runScan(app, "me/proj");
-ok("Free accounts never trigger paid Claude calls", claudeCalls === 0 && app.env.DB.raw.prepare("SELECT scorer FROM scans").get().scorer === "rules");
+ok("Free accounts never trigger paid Claude calls", claudeCalls === 0 && (await app.one("SELECT scorer FROM scans")).scorer === "rules");
 await app.call("POST", "/auth/signup", { body: { email: "owner@cleone.app", password: PW }, as: "o" });
 r = await app.call("GET", "/me", { as: "o" });
 ok("an ADMIN_EMAILS account is Pro without paying", r.data.plan === "pro" && r.data.admin === true);
 await runScan(app, "me/proj", "o");
-ok("Pro + key: Claude is used", claudeCalls > 0 && app.env.DB.raw.prepare("SELECT scorer FROM scans WHERE user_id = ?").get(r.data.user.id).scorer === "claude");
+ok("Pro + key: Claude is used", claudeCalls > 0 && (await app.one("SELECT scorer FROM scans WHERE user_id = ?", r.data.user.id)).scorer === "claude");
 r = await app.call("GET", "/radar", { as: "o" });
 ok("Claude's reasons are what the card shows", r.data.lanes.joiners.items[0].why === "Claude says: strong fit.");
 claudeMode = "fail";
 await runScan(app, "me/proj", "o");
 r = await app.call("GET", "/radar", { as: "o" });
 ok("if Claude fails the scan still finishes with rule-based scores", r.data.repo === "me/proj" && r.data.scorer === "rules" && r.data.lanes.joiners.items[0].why !== "Claude says: strong fit.");
-app.restore();
+await app.restore();
 
 // ---------------------------------------------------------------- password reset by email
-app = makeApp({ RESEND_API_KEY: "re_test", MAIL_FROM: "Cleone <hello@cleone.app>" });
+app = await makeApp({ RESEND_API_KEY: "re_test", MAIL_FROM: "Cleone <hello@cleone.app>" });
 let mail = null;
 app.onOutside(async (u, init) => { if (u.includes("api.resend.com")) { mail = JSON.parse(init.body); return Response.json({ id: "1" }); } return null; });
 await app.call("POST", "/auth/signup", { body: { email: "ada@startup.com", password: PW } });
@@ -141,7 +141,7 @@ r = await app.call("POST", "/auth/reset", { body: { token, password: "another pa
 ok("a reset link cannot be used twice", r.status === 400);
 r = await app.call("POST", "/auth/login", { body: { email: "ada@startup.com", password: "brand new password" } });
 ok("login works with the new password", r.status === 200);
-app.restore();
+await app.restore();
 
 console.log(`\nbilling.test.js: ${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
