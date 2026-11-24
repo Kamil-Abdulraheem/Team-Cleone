@@ -44,6 +44,7 @@ export function checkOrigin(req) {
   if (origin && new URL(origin).host !== new URL(req.url).host) throw new HttpError(403, "Cross-site request blocked");
 }
 
-export const clientIp = (req) => req.headers.get("cf-connecting-ip") || "local";
+export const clientIp = (req) =>
+  req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "local";
 export const now = () => Math.floor(Date.now() / 1000);
 export const monthKey = () => new Date().toISOString().slice(0, 7);

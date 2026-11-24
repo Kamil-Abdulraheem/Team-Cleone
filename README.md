@@ -7,29 +7,44 @@ Plain HTML, CSS and JavaScript. No build step, no framework, no TypeScript.
 | Part | Where | What it is |
 |---|---|---|
 | Screens | `public/index.html`, `public/app.js` | The prototype's look, plus login, settings and plan screens |
-| Backend | `functions/api/[[path]].js` | Every API route, one short handler each |
+| Backend | `functions/_lib/app.js` | Every API route, one short handler each |
 | Scan engine | `functions/_lib/engine.js` | Reads GitHub, split into small steps |
 | Scoring and drafts | `functions/_lib/score.js` | Rule-based scores, outreach text, the paywall ranking |
 | Numbers you may want to change | `functions/_lib/config.js`, top of `engine.js` | Plan limits, cutoff, strictness |
-| Database | `schema.sql` | Cloudflare D1 (SQLite): 11 small tables |
+| Database | `schema.sql` (copied to `functions/_lib/schema.js`) | SQLite: 11 small tables |
+| Vercel entry | `api/[...path].js`, `vercel.json` | Runs the backend on Vercel |
+| Cloudflare entry | `functions/api/[[path]].js` | Runs the same backend on Cloudflare Pages |
 
-It runs free on **Cloudflare Pages + D1** (no Vercel). Cloudflare's free plan allows 100,000 requests a day.
+The backend is the same on both hosts, so you can start on one and move to the other later without rewriting anything.
 
 ---
 
-## Put it online (all of this works from a phone browser)
+## Put it online on Vercel (works from a phone browser)
 
-**1. Create the site.** In the Cloudflare dashboard: *Workers & Pages > Create > Pages > Connect to Git*, pick this repo and the `main` branch. Framework preset: **None**. Build command: leave empty. Build output directory: **`public`**. Save and deploy.
+**A note on cost.** Vercel's free *Hobby* plan is for personal, non-commercial projects. Building and testing on it is fine. Once you charge customers, Vercel's terms require the *Pro* plan (about $20 a month). Cloudflare's free plan allows commercial use, so you can move there later (see the end of this section). Turso, the database, has a free plan that is enough to start.
 
-**2. Create the database.** *Storage & Databases > D1 SQL database > Create*, name it `cleone`. Open it, go to the **Console** tab, paste the whole contents of `schema.sql`, and run it.
+**1. Create the database (Turso).** Go to turso.tech and sign up with GitHub. Create a database named `cleone`. Pick the **Frankfurt** location (it sits next to the Vercel region set in `vercel.json`). Open the database and copy two things: its **URL** (starts with `libsql://`) and a **token** (create one from the database page; the dashboard wording may change). You do not need to create any tables. The app creates them itself the first time it runs.
 
-**3. Connect them.** Open your Pages project > *Settings > Bindings > Add > D1 database*. Variable name: **`DB`**. Choose `cleone`. Save, then redeploy (*Deployments > Retry deployment*).
+**2. Create the site (Vercel).** Go to vercel.com and sign up with GitHub. *Add New > Project*, import `Team-Cleone`. Leave everything as it is (the settings are in `vercel.json`). Before you press Deploy, open **Environment Variables** and add:
 
-**4. Add your GitHub token (required).** Pages project > *Settings > Variables and Secrets > Add*, type **Secret**, name **`GITHUB_TOKEN`**. Create the token at github.com/settings/personal-access-tokens: fine-grained, **public repositories read-only**, nothing else. Without it GitHub only allows 60 calls an hour shared with strangers, and scans fail.
+| Name | Value |
+|---|---|
+| `TURSO_DATABASE_URL` | the `libsql://...` URL from step 1 |
+| `TURSO_AUTH_TOKEN` | the token from step 1 |
+| `GITHUB_TOKEN` | a GitHub token (see step 3) |
+| `ADMIN_EMAILS` | your email, so you get Pro for testing |
 
-**5. Make yourself Pro for testing.** Add a variable **`ADMIN_EMAILS`** with your email. Sign up with that email and you get Pro without paying.
+Press **Deploy**. When it finishes, open the link.
 
-Open your site, create an account, paste a repo. That is the whole setup.
+**3. The GitHub token (required).** Create it at github.com/settings/personal-access-tokens: fine-grained, **public repositories, read-only**, nothing else. Without it GitHub allows only 60 calls an hour, shared with strangers, and scans fail.
+
+**4. Use it.** Open your site, create an account with the email you put in `ADMIN_EMAILS`, paste a repo. If something is wrong, the app tells you (for example "The database is not connected").
+
+Changing a variable later: *Project > Settings > Environment Variables*, then *Deployments > Redeploy*.
+
+### Or on Cloudflare Pages + D1 (free, commercial use allowed)
+
+Create a Pages project from this repo with framework **None**, build command empty, output directory **`public`**. Create a D1 database named `cleone`, paste `schema.sql` into its Console, and bind it to the project as **`DB`** (Settings > Bindings). Add `GITHUB_TOKEN` and `ADMIN_EMAILS` as variables. Redeploy.
 
 ### Optional extras (each switches on one feature)
 
