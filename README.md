@@ -46,9 +46,26 @@ The GitHub token: create it at github.com/settings/personal-access-tokens as a f
 |---|---|
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_CODE`, `PRO_AMOUNT`, `PRO_CURRENCY` | Real subscriptions (see below) |
 | `RESEND_API_KEY`, `MAIL_FROM` | Password-reset emails (resend.com has a free tier) |
+| `CV_ENCRYPTION_KEY` | Job Radar: encrypts saved CVs (AES-GCM). Without it, CV text is read for skills but never stored |
+| `CRON_SECRET` | Job Radar: lets the daily scheduled run (`/api/cron/jobs`, set in vercel.json) re-check jobs, send alerts and "this just closed" updates. Without it the cron refuses to run |
 | `ANTHROPIC_API_KEY` (and optionally `SCORE_MODEL`) | Claude scoring for Pro accounts. Off until you add it. Falls back to the rules if it ever fails |
 
 **Paystack** (works for Nigerian businesses; Stripe does not). Create a Paystack account, create a monthly **Plan**, then set the variables above. `PRO_AMOUNT` is in the smallest unit (kobo or cents) and should match the plan. In Paystack's settings set the webhook URL to `https://YOUR-SITE/api/billing/webhook`. Until these are set, the plan page shows the waitlist form, as in the prototype.
+
+## Features (switch on what you need)
+
+Cleone is a set of features, switched on from **Menu > Features**:
+
+- **Repo scan**: scans a GitHub repo for partners, acquirers, joiners and investors. Every result opens to full details.
+- **Job Radar**: scans public job boards (Remotive, Arbeitnow, RemoteOK), then:
+  - drops noise and shows a job that is on several boards once;
+  - checks each apply page and only calls a job **open** when it checked. If it could not, it says **could not verify**;
+  - warns about scams (pay-to-apply, WhatsApp-only, personal email, fake-cheque patterns) and flags ghost or reposted jobs;
+  - matches against your profile and explains each match, including the gaps;
+  - drafts a CV summary and cover letter, prepares interview questions and tracks applications with follow-up reminders. **It never applies for you.**
+  - the daily cron re-checks before alerting (Pro) and sends a "this just closed" update.
+
+Not built yet: Telegram, a Nigerian-specific board (Jobberman, MyJobMag and similar need their terms checked first), co-founder lane in Repo scan, learning beyond like/dismiss, and a cheap-model/strong-model split for Job Radar. Quality numbers (false-alert rate, funnel) are at `/api/jobs/health/metrics` for admins and only mean something once there is real usage.
 
 ## What is live and what is not
 

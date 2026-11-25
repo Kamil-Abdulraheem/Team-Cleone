@@ -118,3 +118,82 @@ CREATE TABLE IF NOT EXISTS waitlist (
   email       TEXT PRIMARY KEY,
   created_at  BIGINT NOT NULL
 );
+
+-- ---------------------------------------------------------------- Job Radar (feature module)
+
+ALTER TABLE usage ADD COLUMN IF NOT EXISTS job_scans INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS job_profiles (
+  user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  roles       TEXT NOT NULL DEFAULT '',         -- comma separated target roles
+  skills      TEXT NOT NULL DEFAULT '',         -- comma separated, extracted from the CV and edited by the person
+  years       INTEGER NOT NULL DEFAULT 0,
+  location    TEXT NOT NULL DEFAULT '',
+  remote_only INTEGER NOT NULL DEFAULT 0,
+  min_salary  INTEGER NOT NULL DEFAULT 0,       -- USD per year, 0 = no floor
+  paused_until BIGINT NOT NULL DEFAULT 0,       -- seconds; alerts and scans pause until then
+  cv_enc      TEXT,                             -- the CV text, AES-GCM encrypted. Null when no encryption key is set
+  updated_at  BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id          TEXT PRIMARY KEY,
+  fp          TEXT NOT NULL UNIQUE,             -- fingerprint of company + title + place: the same job on two boards is one row
+  title       TEXT NOT NULL,
+  company     TEXT NOT NULL,
+  location    TEXT NOT NULL DEFAULT '',
+  remote      INTEGER NOT NULL DEFAULT 0,
+  salary_min  INTEGER,
+  salary_max  INTEGER,
+  currency    TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',         -- plain text, trimmed
+  tags        TEXT NOT NULL DEFAULT '',
+  posted_at   BIGINT,
+  first_seen  BIGINT NOT NULL,
+  last_seen   BIGINT NOT NULL,
+  reposts     INTEGER NOT NULL DEFAULT 0,       -- how many times the board showed it as new again
+  sources     TEXT NOT NULL DEFAULT '[]',       -- JSON [{source, url}]
+  apply_url   TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'unverified', -- open | closed | unverified
+  verified_at BIGINT,
+  verify_note TEXT NOT NULL DEFAULT '',
+  scam_score  INTEGER NOT NULL DEFAULT 0,       -- 0 to 100
+  scam_flags  TEXT NOT NULL DEFAULT '[]',       -- JSON list of plain-language reasons
+  ghost_flags TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, last_seen);
+
+CREATE TABLE IF NOT EXISTS job_matches (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  job_id      TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  score       INTEGER NOT NULL,
+  why         TEXT NOT NULL DEFAULT '[]',       -- JSON list: reasons it fits
+  gaps        TEXT NOT NULL DEFAULT '[]',       -- JSON list: what the job asks for that the CV lacks
+  state       TEXT NOT NULL DEFAULT 'new',      -- new | saved | applied | replied | interview | offer | rejected | dismissed
+  note        TEXT NOT NULL DEFAULT '',
+  follow_up   BIGINT,                           -- seconds; when to remind
+  alerted_at  BIGINT,
+  closed_alerted_at BIGINT,
+  created_at  BIGINT NOT NULL,
+  updated_at  BIGINT NOT NULL,
+  UNIQUE (user_id, job_id)
+);
+CREATE INDEX IF NOT EXISTS idx_jobmatches_user ON job_matches(user_id, state);
+
+CREATE TABLE IF NOT EXISTS job_reports (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  job_id      TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                    -- was_closed | looks_scam | useful
+  created_at  BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_health (
+  source      TEXT PRIMARY KEY,
+  last_ok     BIGINT,
+  last_fail   BIGINT,
+  fails_in_row INTEGER NOT NULL DEFAULT 0,
+  last_count  INTEGER NOT NULL DEFAULT 0,
+  last_error  TEXT NOT NULL DEFAULT ''
+);

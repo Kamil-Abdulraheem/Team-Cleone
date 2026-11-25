@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 let bad = 0;
-for (const f of ["test/api.test.js", "test/billing.test.js", "test/app.test.js", "test/vercel.test.js"]) {
+for (const f of ["test/api.test.js", "test/billing.test.js", "test/app.test.js", "test/jobs.test.js", "test/vercel.test.js"]) {
   const { existsSync } = await import("node:fs");
   if (!existsSync(f)) continue;
   console.log(`\n=== ${f}`);
