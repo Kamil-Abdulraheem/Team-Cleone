@@ -358,10 +358,18 @@ ${FEATURES.map(x => `<div class="card"><div class="w"><span><b>${x.name}</b><br>
 
 const money = n => '$' + Number(n).toLocaleString('en-US');
 const badge = j => j.scamScore >= 50 ? '<span class="bd bad">Looks suspicious</span>' : j.status === 'open' ? '<span class="bd good">Confirmed open</span>' : j.status === 'closed' ? '<span class="bd bad">Closed</span>' : '<span class="bd warn">Could not verify</span>';
-const jobCard = j => `<div class="card tap" role="button" tabindex="0" onclick="jobDetail('${esc(j.id)}')" onkeydown="if(event.key==='Enter')jobDetail('${esc(j.id)}')">
-<div class="top"><div><div class="name">${esc(j.title)}</div><div class="kind">${esc(j.company)} &middot; ${j.remote ? 'Remote' : esc(j.location || 'On-site')}</div></div><div class="score">${j.score}</div></div>
-<div style="margin:8px 0">${badge(j)}${j.boards > 1 ? `<span class="bd">On ${j.boards} boards, shown once</span>` : ''}${j.ghostFlags.length ? `<span class="bd warn">${esc(j.ghostFlags[0])}</span>` : ''}${j.salary ? `<span class="bd">${money(j.salary.min)} to ${money(j.salary.max)}</span>` : ''}${j.adjacent ? '<span class="bd">Adjacent role</span>' : ''}${j.synthetic ? '<span class="bd bad">Sample</span>' : ''}</div>
-<p class="why" style="margin:0">${esc(j.why[0] || j.verifyNote || '')}</p></div>`;
+const age_ = t => { if (!t) return ''; const d = Math.floor((Date.now() / 1000 - t) / 86400); return d < 1 ? 'posted today' : d === 1 ? 'posted yesterday' : 'posted ' + d + ' days ago'; };
+const jobCard = j => `<div class="card tap job" role="button" tabindex="0" onclick="jobDetail('${esc(j.id)}')" onkeydown="if(event.key==='Enter')jobDetail('${esc(j.id)}')">
+<div class="top"><div style="min-width:0"><div class="name">${esc(j.title)}</div><div class="kind">${esc(j.company)} &middot; ${j.remote ? 'Remote' : esc(j.location || 'On-site')}${j.employmentType ? ' &middot; ' + esc(j.employmentType) : ''}${j.postedAt ? ' &middot; ' + age_(j.postedAt) : ''}</div></div><span class="chip" title="How well this job matches your profile">${j.score}% match</span></div>
+${j.snippet ? `<p class="snip">${esc(j.snippet)}${j.snippet.length >= 200 ? '...' : ''}</p>` : ''}
+<div style="margin:6px 0">${badge(j)}${j.salary ? `<span class="bd">${money(j.salary.min)} to ${money(j.salary.max)} a year</span>` : ''}${j.boards > 1 ? `<span class="bd">On ${j.boards} boards, shown once</span>` : ''}${j.ghostFlags.length ? `<span class="bd warn">${esc(j.ghostFlags[0])}</span>` : ''}${j.adjacent ? '<span class="bd">Adjacent role</span>' : ''}${j.synthetic ? '<span class="bd bad">Sample</span>' : ''}</div>
+<div class="acts" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"><a class="btn sm" href="${safe(j.applyUrl)}" target="_blank" rel="noopener noreferrer">View job on ${esc(j.source)} &#8599;</a></div></div>`;
+
+function feedCard(f) {
+  if (!f) return '';
+  const rows = f.sources.map(x => `<div class="kv"><span>${esc(x.label.replace(/ \(.*$/, ''))}</span><span>${x.ok ? `<span class="bd good">${x.jobs} jobs</span>` : `<span class="bd bad">${x.error ? esc(x.error).slice(0, 60) : 'not run yet'}</span>`}</span></div>`).join('');
+  return `<div class="sec">Where these jobs come from</div><div class="card"><p class="why" style="margin-top:0">${f.jobsTotal} real vacancies collected${f.lastSync ? ', last updated ' + ago_(f.lastSync) : ''}. Each one links to its original posting. We never invent jobs.</p>${rows}</div>`;
+}
 
 async function jobs() {
   if (!S.me) return auth('login');
@@ -380,7 +388,7 @@ async function jobs() {
 ${sec_('Confirmed open', list.open)}${sec_('Could not verify. Check the employer page first', list.unverified)}${sec_('Adjacent careers you could move into', list.adjacent || [])}
 ${list.locked ? `<div class="card lock"><div class="ov" style="position:static;padding:8px"><b>${list.locked} more match${list.locked > 1 ? 'es' : ''} on Pro</b><button class="btn" onclick="nav('alerts')">Unlock with Pro</button></div></div>` : ''}
 ${sec_('Your applications', list.tracker)}${sec_('Closed since we told you', list.closed)}${sec_('Looks suspicious. Not recommended', list.suspicious)}
-${list.open.length + list.unverified.length + (list.adjacent || []).length + list.tracker.length ? '' : '<p class="sub">No matches yet. Tap Scan for jobs.</p>'}<div id="mk"></div>`;
+${list.open.length + list.unverified.length + (list.adjacent || []).length + list.tracker.length ? '' : `<div class="empty">${list.feed && list.feed.jobsTotal === 0 ? 'No jobs have been collected yet. Tap Scan for jobs. If this stays empty, the job sources could not be reached; the list below shows why.' : 'Nothing matches your profile well enough yet. Try other roles, or switch off Remote only.'}</div>`}<div id="mk"></div>${feedCard(list.feed)}`;
   $('#js').onclick = jobScan; $('#jp').onclick = () => jobSetup(pr);
   $('#jc').onkeydown = async e => { if (e.key !== 'Enter' || !e.target.value.trim()) return;
     try { const r = await api('/jobs/command', { method: 'POST', body: { text: e.target.value } }); e.target.value = ''; const n = $('#jr'); n.style.display = ''; n.textContent = r.reply; if (/remote|Now looking/.test(r.reply)) jobs(); } catch (x) { toast(x.message); } };
@@ -441,7 +449,7 @@ ${(d.unknown || []).length ? `<div class="sec">Could not compare</div>${d.unknow
 ${d.gaps.length ? `<div class="sec">Missing requirements</div>${d.gaps.map(w => `<p class="why" style="margin:4px 0">&#8226; ${esc(w)}</p>`).join('')}` : ''}
 <div class="sec">The job</div><div class="mail" style="max-height:220px;overflow:auto">${esc(d.description)}</div>
 <div class="sec">Where it came from</div><p class="why" style="margin:4px 0">First found on <b>${esc(d.originalSource || 'unknown')}</b>${d.postedAt ? ', published ' + when(d.postedAt) : ''}${d.verifiedAt ? ', last verified ' + when(d.verifiedAt) + (d.verifiedVia === 'feed' ? ' (listed on the employer\'s own board)' : d.verifiedVia === 'page' ? ' (apply page checked)' : '') : ', not yet verified'}${d.validThrough ? ', closes ' + when(d.validThrough) : ''}.${d.synthetic ? ' <b>Sample data.</b>' : ''}</p><div class="sec">Posted on</div>${d.boardLinks.map(b => `<a class="lnk" href="${safe(b.url)}" target="_blank" rel="noopener noreferrer">${esc(b.source)}</a> `).join('')}
-<div class="acts" style="margin-top:14px"><a class="btn" href="${safe(d.applyUrl)}" target="_blank" rel="noopener noreferrer">Open employer page</a>
+<div class="acts" style="margin-top:14px"><a class="btn" href="${safe(d.applyUrl)}" target="_blank" rel="noopener noreferrer">Open the original job &#8599;</a>
 <button onclick="jobAct('${esc(id)}','draft')">Draft CV summary + letter</button><button onclick="jobAct('${esc(id)}','prep')">Interview prep</button><button onclick="jobAct('${esc(id)}','recheck')">Check it is still open</button></div>
 <div class="acts" style="margin-top:10px"><button onclick="jobState('${esc(id)}','saved')">Save</button><button class="p" onclick="jobState('${esc(id)}','applied')">I applied</button><button onclick="jobState('${esc(id)}','replied')">Replied</button><button onclick="jobState('${esc(id)}','interview')">Interview</button><button onclick="jobState('${esc(id)}','dismissed','Not relevant')">Not relevant</button></div>
 <div class="acts" style="margin-top:10px"><button onclick="jobReport('${esc(id)}','was_closed')">It was already closed</button><button onclick="jobReport('${esc(id)}','looks_scam')">Looks like a scam</button></div>

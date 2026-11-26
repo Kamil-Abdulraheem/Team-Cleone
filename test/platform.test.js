@@ -40,6 +40,12 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
   const shown = [...r.data.open, ...r.data.unverified, ...r.data.adjacent];
   ok("sandbox mode shows only sample jobs, flagged, and never a real one", r.data.sandbox === true && shown.length > 0 && shown.every((j) => j.synthetic) && !shown.some((j) => j.company === "RealCo"));
 
+  const first_ = shown[0];
+  ok("list items carry the real details: excerpt, original link, source name", first_ && first_.snippet.length > 40 && first_.applyUrl.startsWith("https://") && first_.source && first_.company);
+  ok("the list says which sources the jobs came from and how many", r.data.feed.jobsTotal > 5 && r.data.feed.sources.length === 8 && r.data.feed.sources.every((x) => x.ok && x.jobs > 0) && r.data.feed.lastSync > 1e9);
+  const hz = (await call("GET", "/health")).data;
+  ok("health lists each source: working or not, HTTP status, jobs, error", hz.jobs.collected > 5 && hz.jobs.sources.length >= 8 && hz.jobs.sources.every((x) => "working" in x && "httpStatus" in x) && hz.jobs.sources.filter((x) => x.working).length === 8);
+
   // removal, safety valve, empty feed, expiry
   const saved = clone(F.greenhouse);
   F.greenhouse.jobs = F.greenhouse.jobs.filter((j) => j.id !== 4013);

@@ -69,9 +69,13 @@ ok("profile form has qualification and work-type fields", !!b.q("#jed") && !!b.q
 b.type("#jr_", "backend engineer"); b.type("#jcv", "Python and Django developer with 4 years of experience. BSc."); b.click("#jsv");
 await wait(() => b.q("#js"), 15000); await wait(() => /Acme|Backend|Python|Engineer/.test(b.text()) || b.qa(".card.tap").length > 0, 15000);
 ok("after saving, matching vacancies appear, with a clear SANDBOX banner", b.qa(".card.tap").length > 0 && /SANDBOX DATA/.test(b.text()) && /Sample/.test(b.text()));
+const jc0 = b.q(".card.job");
+ok("each job card leads with real details: title, company, description excerpt and a link to the original posting", !!jc0 && jc0.querySelector(".name").textContent.length > 3 && jc0.querySelector(".kind").textContent.includes("·") && jc0.querySelector(".snip").textContent.length > 40 && /^https:\/\//.test(jc0.querySelector("a.btn").href) && /View job on/.test(jc0.querySelector("a.btn").textContent) && jc0.querySelector("a.btn").rel.includes("noopener"));
+ok("the match score is a small chip, not the headline", /% match/.test(jc0.querySelector(".chip").textContent) && !jc0.querySelector(".score"));
+ok("a panel says where the jobs came from, with counts", /Where these jobs come from/.test(b.text()) && /real vacancies collected/.test(b.text()) && /Each one links to its original posting/.test(b.text()));
 b.w.eval(b.q(".card.tap").getAttribute("onclick")); await wait(() => /Score breakdown/.test(b.q("#panel").textContent));
 const panel = b.q("#panel").textContent;
-ok("a job opens to a score breakdown, reasons, missing requirements and where it came from", /Score breakdown/.test(panel) && /Where it came from/.test(panel) && /Sample data/.test(panel) && /Open employer page/.test(panel) && /never applies for you/.test(panel));
+ok("a job opens to a score breakdown, reasons, missing requirements and where it came from", /Score breakdown/.test(panel) && /Where it came from/.test(panel) && /Sample data/.test(panel) && /Open the original job/.test(panel) && /never applies for you/.test(panel));
 await app.restore();
 
 // admin: Source Intelligence
