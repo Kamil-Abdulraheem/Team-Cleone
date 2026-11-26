@@ -30,7 +30,7 @@ async function browser(app, search = "") {
 }
 
 // ============================================================ logged out
-let app = await makeApp();
+let app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}' });
 let b = await browser(app);
 await wait(() => b.q(".home h1")?.textContent === "Welcome back");
 ok("logged-out visitors see the log-in screen", b.q(".home h1")?.textContent === "Welcome back");
@@ -56,7 +56,7 @@ ok("progress screen uses the prototype's four lines", b.q("h2")?.textContent ===
 ok("last line is honest about rule-based scoring", b.qa("#st p")[3].textContent === "Scoring each match");
 await wait(() => b.q("h2")?.textContent === "me/proj");
 ok("scan finishes and opens the radar", b.q("h2")?.textContent === "me/proj");
-ok("radar keeps prototype tabs", b.qa(".tabs button").map((x) => x.textContent).join("|") === "Partners and acquirers|Joiners|Investors");
+ok("radar shows the three original tabs plus Co-founders", b.qa(".tabs button").map((x) => x.textContent).join("|") === "Partners and acquirers|Joiners|Investors|Co-founders");
 ok("note explains the scoring and the Free limit", /Rule-based scores/.test(b.q(".note").textContent) && /1 match per lane/.test(b.q(".note").textContent));
 
 // ============================================================ the paywall in the UI
@@ -142,7 +142,7 @@ ok("delete removes the account and returns to sign-up", b.q(".home h1")?.textCon
 await app.restore();
 
 // ============================================================ Pro and payments-on variants
-app = await makeApp({ ADMIN_EMAILS: "boss@cleone.app", PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
+app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}', ADMIN_EMAILS: "boss@cleone.app", PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#nm", "Boss"); b.type("#em", "boss@cleone.app"); b.type("#pw", "correct horse battery"); b.click("#ok");
@@ -157,7 +157,7 @@ b.click(".me"); await wait(() => b.q("#panel .row"));
 ok("Pro menu has no Upgrade entry", b.qa("#panel .row").map((x) => x.textContent.trim()).join("|") === "Settings|Log out");
 await app.restore();
 
-app = await makeApp({ PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
+app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}', PAYSTACK_SECRET_KEY: "k", PRO_AMOUNT: "1", PAYSTACK_PLAN_CODE: "P" });
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#em", "free@user.com"); b.type("#pw", "correct horse battery"); b.click("#ok");
@@ -167,7 +167,7 @@ ok("payments on: the plan page offers Upgrade to Pro instead of the waitlist", !
 await app.restore();
 
 // reset link in the address bar
-app = await makeApp();
+app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}' });
 b = await browser(app, "?reset=abc");
 await wait(() => b.q("h2"));
 ok("a reset link opens the choose-a-new-password screen", /Choose a new password/.test(b.q("h2").textContent));

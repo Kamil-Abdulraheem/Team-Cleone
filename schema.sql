@@ -189,11 +189,76 @@ CREATE TABLE IF NOT EXISTS job_reports (
   created_at  BIGINT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS source_health (
-  source      TEXT PRIMARY KEY,
-  last_ok     BIGINT,
-  last_fail   BIGINT,
-  fails_in_row INTEGER NOT NULL DEFAULT 0,
-  last_count  INTEGER NOT NULL DEFAULT 0,
-  last_error  TEXT NOT NULL DEFAULT ''
+-- ---------------------------------------------------------------- Job acquisition infrastructure
+
+-- One row per configured job source. Built-in public feeds are added on first start; admins add employer boards.
+CREATE TABLE IF NOT EXISTS source_configs (
+  id            TEXT PRIMARY KEY,               -- e.g. remotive, greenhouse:acme
+  adapter       TEXT NOT NULL,                  -- greenhouse | lever | ashby | rss | careerpage | remotive | arbeitnow | remoteok | jobberman | myjobmag
+  label         TEXT NOT NULL,
+  config        TEXT NOT NULL DEFAULT '{}',     -- JSON, adapter specific (board token, feed url, ...). No secrets.
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  builtin       INTEGER NOT NULL DEFAULT 0,
+  interval_min  INTEGER NOT NULL DEFAULT 360,   -- how often the scheduler should sync it
+  last_attempt  BIGINT,
+  last_ok       BIGINT,                         -- last successful synchronization
+  last_fail     BIGINT,
+  fails_in_row  INTEGER NOT NULL DEFAULT 0,
+  last_status   INTEGER,                        -- HTTP status of the last request
+  last_count    INTEGER NOT NULL DEFAULT 0,     -- jobs retrieved by the last successful request
+  last_ms       INTEGER,
+  last_error    TEXT NOT NULL DEFAULT '',
+  created_at    BIGINT NOT NULL
+);
+
+-- Every request we make to a source, kept for 14 days: this is the error log.
+CREATE TABLE IF NOT EXISTS source_runs (
+  id          BIGSERIAL PRIMARY KEY,
+  source_id   TEXT NOT NULL,
+  kind        TEXT NOT NULL,                    -- sync | diagnostic
+  at          BIGINT NOT NULL,
+  ok          INTEGER NOT NULL,
+  http_status INTEGER,
+  jobs        INTEGER NOT NULL DEFAULT 0,
+  new_jobs    INTEGER NOT NULL DEFAULT 0,
+  removed     INTEGER NOT NULL DEFAULT 0,
+  ms          INTEGER,
+  error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_source_runs_at ON source_runs(at);
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS external_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS employment_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS valid_through BIGINT;       -- the employer's stated closing date, if any
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS closed_at BIGINT;           -- when we found it expired or removed
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS closed_reason TEXT NOT NULL DEFAULT '';  -- expired | removed | page | reported
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS verified_via TEXT NOT NULL DEFAULT '';   -- feed (the employer's own board lists it right now) | page | report
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS synthetic INTEGER NOT NULL DEFAULT 0;   -- 1 = sandbox sample data. Never mixed with real vacancies.
+CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
+
+ALTER TABLE job_matches ADD COLUMN IF NOT EXISTS detail TEXT NOT NULL DEFAULT '{}';  -- JSON: component scores, unknowns, confidence
+
+ALTER TABLE job_profiles ADD COLUMN IF NOT EXISTS education INTEGER NOT NULL DEFAULT 0;  -- 0 unknown, 1 secondary/OND, 2 HND/bachelor, 3 master, 4 doctorate
+ALTER TABLE job_profiles ADD COLUMN IF NOT EXISTS employment TEXT NOT NULL DEFAULT '';   -- full-time,contract,...
+ALTER TABLE job_profiles ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT '';       -- one line about the person, from the CV
+ALTER TABLE job_profiles ADD COLUMN IF NOT EXISTS monitor INTEGER NOT NULL DEFAULT 1;     -- Pro: keep watching for new vacancies
+ALTER TABLE job_profiles ADD COLUMN IF NOT EXISTS alert_min INTEGER NOT NULL DEFAULT 70;  -- Pro: only alert at or above this match score
+ALTER TABLE usage ADD COLUMN IF NOT EXISTS ai_calls INTEGER NOT NULL DEFAULT 0;
+
+-- Independent second checks of our "open" verdicts. This is how the accuracy of "open" is measured.
+CREATE TABLE IF NOT EXISTS verdict_audits (
+  id          BIGSERIAL PRIMARY KEY,
+  job_id      TEXT NOT NULL,
+  first_via   TEXT NOT NULL,
+  first_at    BIGINT NOT NULL,
+  second_status TEXT NOT NULL,
+  agree       INTEGER NOT NULL,
+  at          BIGINT NOT NULL
+);
+
+-- Cached AI answers, so the same job or CV is never paid for twice.
+CREATE TABLE IF NOT EXISTS ai_cache (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  created_at  BIGINT NOT NULL
 );

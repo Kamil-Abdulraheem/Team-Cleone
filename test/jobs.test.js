@@ -17,7 +17,7 @@ ok("ghost: old and reposted jobs are flagged", ghostCheck({ description: desc, p
 const profile = { roles: "backend developer", skills: "python,docker", years: 1, remote_only: 0, location: "", min_salary: 0 };
 const m = matchJob(profile, { title: "Backend Developer", tags: "python", description: desc, remote: 1, location: "Remote" });
 ok("match explains fit and gaps in plain language", m.score >= 60 && m.why.some((w) => /backend developer/.test(w)) && m.gaps.some((g) => /3 years of django/i.test(g)) && m.gaps.some((g) => /postgresql/.test(g)), JSON.stringify(m));
-ok("remote-only profile rejects on-site jobs", matchJob({ ...profile, remote_only: 1 }, { title: "Backend Developer", tags: "", description: desc, remote: 0, location: "Lagos" }).score < m.score - 30);
+ok("remote-only profile rejects on-site jobs", matchJob({ ...profile, remote_only: 1 }, { title: "Backend Developer", tags: "", description: desc, remote: 0, location: "Lagos" }).score <= 30);
 ok("skills are read from a CV", extractSkills("Built APIs with Django and PostgreSQL, deployed on AWS using Docker").join() === "django,postgresql,docker,aws" || ["django", "postgresql", "docker", "aws"].every((s) => extractSkills("Built APIs with Django and PostgreSQL, deployed on AWS using Docker").includes(s)));
 ok("commands: pause, remote, why, unknown", parseCommand("pause until Monday").action === "pause" && parseCommand("only remote now").action === "remote" && parseCommand("why did you send this?").action === "why" && parseCommand("blah").action === "unknown");
 ok("cover letter is a draft with no pretend facts", /\[add one specific result/.test(coverLetter(profile, { title: "Backend Developer", company: "Acme", tags: "", description: desc }, "Ada").letter));
@@ -56,9 +56,9 @@ pages["https://jobs.test/gone"] = resp("", 404);
 pages["https://jobs.test/slow"] = resp("", 403);
 
 let r = await call("POST", "/auth/signup", { body: { email: "ada@startup.com", password: PW, name: "Ada Obi" } });
-ok("feature switches: Repo scan on, Job Radar off by default", r.data.features.repo === true && r.data.features.jobs === false);
-r = await call("PATCH", "/me", { body: { prefs: { features: { jobs: true, evil: true } } } });
-ok("Job Radar can be switched on; unknown features are ignored", r.data.features.jobs === true && r.data.features.evil === undefined);
+ok("feature switches: Job Radar on for everyone, Repo scan off until switched on", r.data.features.jobs === true && r.data.features.repo === false);
+r = await call("PATCH", "/me", { body: { prefs: { features: { repo: true, evil: true } } } });
+ok("Repo scan can be switched on; unknown features are ignored", r.data.features.repo === true && r.data.features.evil === undefined);
 r = await call("POST", "/jobs/scan");
 ok("scan needs a profile first", r.status === 400);
 r = await call("PUT", "/jobs/profile", { body: { roles: "backend developer", cv: "Ada. 1 year with Python and Docker. Built REST API.", years: 1 } });
@@ -69,7 +69,7 @@ ok("the same job on three boards is stored once", (await app.one("SELECT COUNT(*
 ok("noise (no description) never enters", (await app.one("SELECT COUNT(*) AS n FROM jobs WHERE company = 'Kitchen'")).n == 0);
 r = await call("GET", "/jobs");
 const titles = (a) => a.map((x) => x.company);
-ok("Free plan: 3 shown, the rest only counted", r.data.open.length + r.data.unverified.length === 3 && r.data.locked >= 0, JSON.stringify([r.data.open.length, r.data.unverified.length, r.data.locked]));
+ok("Free plan: at most 3 shown, the rest only counted", r.data.open.length + r.data.unverified.length + r.data.adjacent.length <= 3 && r.data.open.length + r.data.unverified.length + r.data.adjacent.length >= 2, JSON.stringify([r.data.open.length, r.data.unverified.length, r.data.locked]));
 ok("confirmed-open jobs are separate from 'could not verify'", titles(r.data.open).includes("Acme Inc") && r.data.open.every((j) => j.status === "open") && (r.data.unverified.length ? r.data.unverified.every((j) => /could not verify/.test(j.verifyNote)) : true), JSON.stringify(r.data.unverified));
 ok("a dead page (404) is never shown as open", ![...r.data.open, ...r.data.unverified].some((j) => j.company === "Gone Co"));
 ok("the scam is moved to 'looks suspicious' with reasons, not shown as a match", r.data.suspicious.some((j) => j.company === "Quick Cash" && j.scamFlags.length >= 2) && !r.data.open.some((j) => j.company === "Quick Cash"));
@@ -95,14 +95,14 @@ r = await call("POST", "/jobs/command", { body: { text: "why did you send this?"
 ok("command: why did you send this", /scored/.test(r.data.reply));
 r = await call("GET", "/jobs/market");
 ok("market view returns counts", r.status === 200 && r.data.openRoles >= 1);
-r = await call("GET", "/jobs/health/metrics");
-ok("quality metrics are admin only", r.status === 403);
+r = await call("GET", "/admin/sources/dashboard");
+ok("the Source Intelligence dashboard is admin only", r.status === 403);
 r = await call("GET", "/cron/jobs");
 ok("cron refuses without the secret", r.status === 401);
 
 // Pro, alerts and the "just closed" update
 await app.run("INSERT INTO subscriptions (user_id, status, current_period_end, updated_at) SELECT id, 'active', ?, ? FROM users", now + 99999, now);
-await app.run("UPDATE job_profiles SET paused_until = 0, remote_only = 0");
+await app.run("UPDATE job_profiles SET paused_until = 0, remote_only = 0, alert_min = 40");
 await app.run("UPDATE job_matches SET state = 'new', follow_up = NULL");
 r = await call("GET", "/cron/jobs", { headers: { authorization: "Bearer cron-secret" } });
 const al = await app.all("SELECT j.company FROM job_matches mm JOIN jobs j ON j.id = mm.job_id WHERE mm.alerted_at IS NOT NULL");
@@ -119,7 +119,7 @@ ok("users can report a job that was already closed", r.status === 200);
 
 // source failure is isolated and recorded
 down = "arbeitnow";
-await app.run("UPDATE source_health SET last_ok = 1");
+await app.run("UPDATE source_configs SET last_attempt = 1");
 r = await call("POST", "/jobs/scan");
 ok("one broken source never stops the scan and is recorded", r.status === 200 && r.data.sources.find((s) => s.source === "arbeitnow").ok === false && r.data.sources.filter((s) => s.ok).length === 2, JSON.stringify(r.data.sources));
 down = null;

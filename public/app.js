@@ -44,7 +44,7 @@ async function api(path, opts = {}) {
   return data;
 }
 
-const nav = v => { $('#side').classList.remove('on'); if (!S.me && v !== 'auth') return auth('login'); ({ home, radar, alerts, settings, features, jobs, jobAlerts })[v](); };
+const nav = v => { $('#side').classList.remove('on'); if (!S.me && v !== 'auth') return auth('login'); ({ home, radar, alerts, settings, features, jobs, jobAlerts, sources })[v](); };
 
 function theme(t) {
   const r = document.documentElement;
@@ -128,7 +128,7 @@ function side() {
   $('#side').innerHTML = `<div class="hd">Cleone</div>
 ${f.repo ? `<button class="row" onclick="nav('home')">${I.scan}Scan a repo</button><button class="row" onclick="nav('radar')">${I.radar}Radar</button>` : ''}
 ${f.jobs ? `<button class="row" onclick="nav('jobs')">${I.briefcase}Job Radar</button><button class="row" onclick="nav('jobAlerts')">${I.bell}Job alerts</button>` : ''}
-<button class="row" onclick="nav('features')">${I.sliders}Features</button><button class="row" onclick="nav('alerts')">${I.bell}${S.me.plan === 'pro' ? 'Your plan' : 'Upgrade plan'}</button>
+<button class="row" onclick="nav('features')">${I.sliders}Features</button>${S.me.admin ? `<button class="row" onclick="nav('sources')">${I.radar}Source Intelligence</button>` : ''}<button class="row" onclick="nav('alerts')">${I.bell}${S.me.plan === 'pro' ? 'Your plan' : 'Upgrade plan'}</button>
 ${f.repo && S.recent.length ? '<div class="rec">Recent</div>' + S.recent.map(r => `<button class="row sm" onclick="openRepo('${esc(r)}')">${I.radar}${esc(r)}</button>`).join('') : ''}
 <button class="me" onclick="menu()"><span class="av">${esc(n.trim().charAt(0).toUpperCase())}</span><span><b>${esc(n)}</b><small>${esc(S.me.planLabel)} plan</small></span></button>`;
 }
@@ -198,10 +198,10 @@ async function radar(repo) {
   try { r = await api('/radar' + (repo ? '?repo=' + encodeURIComponent(repo) : '')); } catch (e) { toast(e.message); return; }
   S.radar = r;
   if (!r.repo) { $('#main').innerHTML = `<h2>No scan yet</h2><p class="sub">Paste a repo on the home screen to see who is paying attention.</p><button class="btn" onclick="nav('home')">Scan a repo</button>`; return; }
-  const names = { strategic: 'Partners and acquirers', joiners: 'Joiners', investors: 'Investors' };
+  const names = { strategic: 'Partners and acquirers', joiners: 'Joiners', investors: 'Investors', cofounders: 'Co-founders' };
   const L = r.lanes[S.tab];
   const note = (r.scorer === 'claude' ? 'Scored with Claude from public GitHub data.' : 'Rule-based scores from public GitHub data.') + (r.plan === 'free' ? ' The Free plan unlocks 1 match per lane.' : '');
-  const empty = S.tab === 'investors' ? 'No investor-like profiles have starred or forked this repo yet. They appear here when they do.' : 'Nothing new here.';
+  const empty = S.tab === 'cofounders' ? 'No founder-minded builders have engaged with this repo yet. People whose public profile says they build companies appear here.' : S.tab === 'investors' ? 'No investor-like profiles have starred or forked this repo yet. They appear here when they do.' : 'Nothing new here.';
   $('#main').innerHTML = `<button class="back" onclick="nav('home')">${I.back}Home</button><h2>${esc(r.repo)}</h2><p class="sub">Who is paying attention this week</p>
 <div class="note">${note}</div>
 <div class="tabs" role="tablist">${Object.keys(names).map(k => `<button class="${S.tab === k ? 'on' : ''}" onclick="S.tab='${k}';radar('${esc(r.repo)}')">${names[k]}</button>`).join('')}</div>
@@ -246,8 +246,8 @@ ${d.contact ? `<div class="kv"><span>Public contact</span><span>${esc(d.contact)
 // ============================================================ features (switch parts of Cleone on and off)
 
 const FEATURES = [
-  { k: 'repo', name: 'Repo scan', text: 'Scan a GitHub repo for acquirers, partners, joiners and investors.' },
-  { k: 'jobs', name: 'Job Radar', text: 'Scans the web for jobs that fit you. Checks each one is still open, warns about scams and tracks your applications.' }];
+  { k: 'repo', name: 'Repo scan', text: 'Scan a GitHub repo for acquirers, partners, joiners, investors and co-founders.' },
+  { k: 'jobs', name: 'Job Radar', text: 'Finds jobs across many sources that fit your CV. Checks each one is still open, warns about scams, explains every match and tracks your applications.' }];
 
 function features() {
   chrome(true);
@@ -265,7 +265,7 @@ const money = n => '$' + Number(n).toLocaleString('en-US');
 const badge = j => j.scamScore >= 50 ? '<span class="bd bad">Looks suspicious</span>' : j.status === 'open' ? '<span class="bd good">Confirmed open</span>' : j.status === 'closed' ? '<span class="bd bad">Closed</span>' : '<span class="bd warn">Could not verify</span>';
 const jobCard = j => `<div class="card tap" role="button" tabindex="0" onclick="jobDetail('${esc(j.id)}')" onkeydown="if(event.key==='Enter')jobDetail('${esc(j.id)}')">
 <div class="top"><div><div class="name">${esc(j.title)}</div><div class="kind">${esc(j.company)} &middot; ${j.remote ? 'Remote' : esc(j.location || 'On-site')}</div></div><div class="score">${j.score}</div></div>
-<div style="margin:8px 0">${badge(j)}${j.boards > 1 ? `<span class="bd">On ${j.boards} boards, shown once</span>` : ''}${j.ghostFlags.length ? `<span class="bd warn">${esc(j.ghostFlags[0])}</span>` : ''}${j.salary ? `<span class="bd">${money(j.salary.min)} to ${money(j.salary.max)}</span>` : ''}</div>
+<div style="margin:8px 0">${badge(j)}${j.boards > 1 ? `<span class="bd">On ${j.boards} boards, shown once</span>` : ''}${j.ghostFlags.length ? `<span class="bd warn">${esc(j.ghostFlags[0])}</span>` : ''}${j.salary ? `<span class="bd">${money(j.salary.min)} to ${money(j.salary.max)}</span>` : ''}${j.adjacent ? '<span class="bd">Adjacent role</span>' : ''}${j.synthetic ? '<span class="bd bad">Sample</span>' : ''}</div>
 <p class="why" style="margin:0">${esc(j.why[0] || j.verifyNote || '')}</p></div>`;
 
 async function jobs() {
@@ -277,14 +277,15 @@ async function jobs() {
   try { list = await api('/jobs'); } catch (e) { toast(e.message); return; }
   S.jobs = list;
   const sec_ = (t, a) => a.length ? `<div class="sec">${t}</div>${a.map(jobCard).join('')}` : '';
+  const sandbox = list.sandbox ? '<div class="note" style="border:1px solid #c0392b"><b>SANDBOX DATA.</b> These are sample vacancies for development. They are not real jobs.</div>' : '';
   const paused = list.pausedUntil > Date.now() / 1000 ? `<div class="note">Alerts are paused until ${when(list.pausedUntil)}.</div>` : '';
-  $('#main').innerHTML = `<h2>Job Radar</h2><p class="sub">Only jobs we checked are called open. If we could not check, we say so.</p>${paused}
+  $('#main').innerHTML = `<h2>Job Radar</h2><p class="sub">Only jobs we checked are called open. If we could not check, we say so.</p>${sandbox}${paused}
 <div class="acts" style="margin-bottom:12px"><button class="btn" id="js">Scan for jobs</button><button class="btn ghost" id="jp">Edit my profile</button></div>
 <div class="bar" style="margin:0 0 14px;padding:12px 16px"><input id="jc" placeholder='Ask: "only remote now", "pause until Monday", "why did you send this?"' aria-label="Command"></div><div class="note" id="jr" style="display:none"></div>
-${sec_('Confirmed open', list.open)}${sec_('Could not verify. Check the employer page first', list.unverified)}
+${sec_('Confirmed open', list.open)}${sec_('Could not verify. Check the employer page first', list.unverified)}${sec_('Adjacent careers you could move into', list.adjacent || [])}
 ${list.locked ? `<div class="card lock"><div class="ov" style="position:static;padding:8px"><b>${list.locked} more match${list.locked > 1 ? 'es' : ''} on Pro</b><button class="btn" onclick="nav('alerts')">Unlock with Pro</button></div></div>` : ''}
 ${sec_('Your applications', list.tracker)}${sec_('Closed since we told you', list.closed)}${sec_('Looks suspicious. Not recommended', list.suspicious)}
-${list.open.length + list.unverified.length + list.tracker.length ? '' : '<p class="sub">No matches yet. Tap Scan for jobs.</p>'}<div id="mk"></div>`;
+${list.open.length + list.unverified.length + (list.adjacent || []).length + list.tracker.length ? '' : '<p class="sub">No matches yet. Tap Scan for jobs.</p>'}<div id="mk"></div>`;
   $('#js').onclick = jobScan; $('#jp').onclick = () => jobSetup(pr);
   $('#jc').onkeydown = async e => { if (e.key !== 'Enter' || !e.target.value.trim()) return;
     try { const r = await api('/jobs/command', { method: 'POST', body: { text: e.target.value } }); e.target.value = ''; const n = $('#jr'); n.style.display = ''; n.textContent = r.reply; if (/remote|Now looking/.test(r.reply)) jobs(); } catch (x) { toast(x.message); } };
@@ -309,14 +310,17 @@ function jobSetup(pr) {
 <div class="field"><label for="jsk">Your skills (we fill this from the CV; edit freely)</label><input class="in" id="jsk" value="${esc(p.skills || '')}"></div>
 <div class="field"><label for="jy">Years of experience</label><input class="in" id="jy" type="number" min="0" max="50" value="${p.years || 0}"></div>
 <div class="field"><label for="jl">Where you are</label><input class="in" id="jl" value="${esc(p.location || '')}" placeholder="Port Harcourt, Nigeria"></div>
+<div class="field"><label for="jed">Highest qualification</label><select class="in" id="jed">${[['0','Not set (read from CV)'],['1','Secondary school, OND or diploma'],['2','Bachelor degree or HND'],['3','Master degree'],['4','Doctorate']].map(([v, t]) => `<option value="${v}" ${+p.education === +v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+<div class="field"><label for="jem">Type of work you want</label><select class="in" id="jem">${[['', 'Any'], ['full-time', 'Full-time'], ['part-time', 'Part-time'], ['contract', 'Contract'], ['internship', 'Internship']].map(([v, t]) => `<option value="${v}" ${(p.employment || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
 <div class="field"><label for="jm">Minimum yearly pay in USD (optional)</label><input class="in" id="jm" type="number" min="0" value="${p.minSalary || ''}"></div>
 <div class="w"><span>Remote jobs only</span><button class="sw ${p.remoteOnly ? 'on' : ''}" id="jro" role="switch" aria-checked="${!!p.remoteOnly}" aria-label="Remote only"></button></div>
+${S.me.plan === 'pro' ? `<div class="w"><span>Keep watching for new jobs and alert me<br><small style="color:var(--mute)">Pro. Only jobs scoring ${p.alertMin || 70}+ that we confirmed are open.</small></span><button class="sw ${p.monitor === false ? '' : 'on'}" id="jmo" role="switch" aria-label="Monitor"></button></div>` : '<p class="sub" style="font-size:.88rem">Pro members get continuous monitoring: we keep watching and alert you when a highly relevant job appears.</p>'}
 <div class="err" id="er" role="alert"></div><div class="acts"><button class="btn" id="jsv">Save and find jobs</button>${p.roles || p.skills ? '<button class="btn ghost" id="jdel">Delete my profile and CV</button>' : ''}</div>`;
-  $('#jro').onclick = e => e.currentTarget.classList.toggle('on');
+  $('#jro').onclick = e => e.currentTarget.classList.toggle('on'); if ($('#jmo')) $('#jmo').onclick = e => e.currentTarget.classList.toggle('on');
   $('#jsv').onclick = async () => {
     try {
-      const r = await api('/jobs/profile', { method: 'PUT', body: { roles: $('#jr_').value, cv: $('#jcv').value, skills: $('#jsk').value || undefined, years: +$('#jy').value, location: $('#jl').value, minSalary: +$('#jm').value, remoteOnly: $('#jro').classList.contains('on') } });
-      if (r.cvNote) toast(r.cvNote); await jobs(); if (!p.roles && !p.skills) jobScan();
+      const r = await api('/jobs/profile', { method: 'PUT', body: { roles: $('#jr_').value, cv: $('#jcv').value, skills: $('#jsk').value || undefined, years: +$('#jy').value, location: $('#jl').value, minSalary: +$('#jm').value, remoteOnly: $('#jro').classList.contains('on'), education: +$('#jed').value, employment: $('#jem').value, monitor: $('#jmo') ? $('#jmo').classList.contains('on') : undefined } });
+      if (r.cvNote) toast(r.cvNote); else if (r.aiRead) toast('CV read. Check the skills below.'); await jobs(); if (!p.roles && !p.skills) jobScan();
     } catch (e) { $('#er').textContent = e.message; }
   };
   if ($('#jdel')) $('#jdel').onclick = async () => { try { await api('/jobs/profile', { method: 'DELETE' }); toast('Profile and CV deleted'); jobSetup(null); } catch (e) { toast(e.message); } };
@@ -331,10 +335,12 @@ async function jobDetail(id) {
 ${d.scamScore >= 50 ? `<div class="note" style="border:1px solid #c0392b"><b>This looks suspicious.</b> Never pay to apply. ${flags.join('. ')}</div>` : flags.length ? `<div class="note">${flags.join(' &middot; ')}</div>` : ''}
 ${d.likelyToCloseSoon ? `<div class="note">${esc(d.likelyToCloseSoon)}</div>` : ''}
 <div class="dims"><span>Match <b>${d.score}</b></span>${d.salary ? `<span>Pay <b>${money(d.salary.min)} to ${money(d.salary.max)}</b></span>` : ''}<span>${d.companyOpenRoles} role${d.companyOpenRoles === 1 ? '' : 's'} at ${esc(d.company)}</span></div>
+<div class="sec">Score breakdown</div><div class="card" style="padding:10px 14px">${(d.parts || []).map(x => `<div class="kv"><span>${esc(x.label)} <small style="color:var(--mute)">weight ${x.weight}</small></span><span>${x.status === 'unknown' ? '<span class="bd">Not stated</span>' : `<span class="bd ${x.status === 'match' ? 'good' : x.status === 'partial' ? 'warn' : 'bad'}">${Math.round(x.score * 100)}%</span>`}</span></div>`).join('')}<p class="sub" style="font-size:.85rem;margin:8px 0 0">Based on ${d.confidence != null ? Math.round(d.confidence * 100) : '?'}% of the information. Missing details are not held against the job.</p></div>
 <div class="sec">Why it fits</div>${d.why.length ? d.why.map(w => `<p class="why" style="margin:4px 0">&#10003; ${esc(w)}</p>`).join('') : '<p class="sub">No strong reasons found.</p>'}
-${d.gaps.length ? `<div class="sec">Gaps</div>${d.gaps.map(w => `<p class="why" style="margin:4px 0">&#8226; ${esc(w)}</p>`).join('')}` : ''}
+${(d.unknown || []).length ? `<div class="sec">Could not compare</div>${d.unknown.map(w => `<p class="why" style="margin:4px 0;color:var(--mute)">? ${esc(w)}</p>`).join('')}` : ''}
+${d.gaps.length ? `<div class="sec">Missing requirements</div>${d.gaps.map(w => `<p class="why" style="margin:4px 0">&#8226; ${esc(w)}</p>`).join('')}` : ''}
 <div class="sec">The job</div><div class="mail" style="max-height:220px;overflow:auto">${esc(d.description)}</div>
-<div class="sec">Posted on</div>${d.boardLinks.map(b => `<a class="lnk" href="${safe(b.url)}" target="_blank" rel="noopener noreferrer">${esc(b.source)}</a> `).join('')}
+<div class="sec">Where it came from</div><p class="why" style="margin:4px 0">First found on <b>${esc(d.originalSource || 'unknown')}</b>${d.postedAt ? ', published ' + when(d.postedAt) : ''}${d.verifiedAt ? ', last verified ' + when(d.verifiedAt) + (d.verifiedVia === 'feed' ? ' (listed on the employer\'s own board)' : d.verifiedVia === 'page' ? ' (apply page checked)' : '') : ', not yet verified'}${d.validThrough ? ', closes ' + when(d.validThrough) : ''}.${d.synthetic ? ' <b>Sample data.</b>' : ''}</p><div class="sec">Posted on</div>${d.boardLinks.map(b => `<a class="lnk" href="${safe(b.url)}" target="_blank" rel="noopener noreferrer">${esc(b.source)}</a> `).join('')}
 <div class="acts" style="margin-top:14px"><a class="btn" href="${safe(d.applyUrl)}" target="_blank" rel="noopener noreferrer">Open employer page</a>
 <button onclick="jobAct('${esc(id)}','draft')">Draft CV summary + letter</button><button onclick="jobAct('${esc(id)}','prep')">Interview prep</button><button onclick="jobAct('${esc(id)}','recheck')">Check it is still open</button></div>
 <div class="acts" style="margin-top:10px"><button onclick="jobState('${esc(id)}','saved')">Save</button><button class="p" onclick="jobState('${esc(id)}','applied')">I applied</button><button onclick="jobState('${esc(id)}','replied')">Replied</button><button onclick="jobState('${esc(id)}','interview')">Interview</button><button onclick="jobState('${esc(id)}','dismissed','Not relevant')">Not relevant</button></div>
@@ -362,6 +368,54 @@ async function jobAlerts() {
   const label = { new: 'New, checked open', closed: 'Just closed. Do not apply', followup: 'Time to follow up' };
   $('#main').innerHTML = `<button class="back" onclick="nav('jobs')">${I.back}Job Radar</button><h2>Job alerts</h2><p class="sub">We only alert on jobs we confirmed open, and tell you if one closes.${S.me.plan === 'free' ? ' Alerts are part of Pro.' : ''}</p>
 ${r.alerts.length ? r.alerts.map(a => `<div class="card tap" role="button" tabindex="0" onclick="jobDetail('${esc(a.job.id)}')"><div class="sig">${label[a.type]} &middot; ${when(a.at)}</div><div class="name">${esc(a.job.title)}</div><div class="kind">${esc(a.job.company)}</div></div>`).join('') : '<p class="sub">Nothing yet.</p>'}`;
+}
+
+// ============================================================ Source Intelligence (admins only)
+
+const ago = t => { if (!t) return 'never'; const m = Math.floor((Date.now() / 1000 - t) / 60); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.floor(m / 60) + ' h ago' : Math.floor(m / 1440) + ' days ago'; };
+
+async function sources() {
+  chrome(true);
+  let d; try { d = await api('/admin/sources/dashboard'); } catch (e) { $('#main').innerHTML = `<h2>Source Intelligence</h2><p class="sub">${esc(e.message)}</p>`; return; }
+  S.src = d; const m = d.metrics;
+  const metric = (label, value, hint) => `<div class="card" style="padding:12px 14px;margin:0"><div class="sub" style="font-size:.8rem;margin:0">${label}</div><div style="font-size:1.6rem;font-weight:700">${value}</div><div class="sub" style="font-size:.78rem;margin:0">${hint}</div></div>`;
+  const a = d.accuracy, pct = x => x == null ? 'n/a' : (x * 100).toFixed(1) + '%';
+  const verdict = { insufficient: 'Not enough audits yet to claim anything', meets: 'Meets the target (95% confidence)', below: 'Below the target', inconclusive: 'Inconclusive: needs more audits' }[a.verdict];
+  $('#main').innerHTML = `<h2>Source Intelligence</h2><p class="sub">Is the agent finding jobs, or showing old records?</p>
+${d.sandbox ? '<div class="note" style="border:1px solid #c0392b"><b>SANDBOX MODE.</b> Data below is sample data. The live diagnostic is disabled. Remove SOURCE_MODE=sandbox on the deployed backend.</div>' : ''}
+${m.stale ? '<div class="note" style="border:1px solid #c0392b"><b>Data may be stale.</b> No source has synchronized recently. Run the diagnostic and check the scheduler.</div>' : ''}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0">
+${metric('Active sources', m.activeSources, 'Connected job providers')}${metric('Healthy sources', m.healthySources, 'Responding successfully')}${metric('Jobs collected', m.jobsCollected, 'Total vacancies retrieved')}
+${metric('New jobs today', m.newToday, 'Discovered since 00:00 UTC')}${metric('Expired jobs', m.expiredJobs, 'No longer available')}${metric('Failed requests', m.failedRequests, 'Integration errors, last 24 h')}${metric('Last synchronization', ago(m.lastSync), 'Data freshness')}</div>
+<div class="acts" style="margin-bottom:14px"><button class="btn" id="sdg">Run live diagnostic</button><button class="btn ghost" id="ssy">Sync all now</button></div><div id="sres"></div>
+<div class="sec">Sources</div>
+${d.sources.map(s => `<div class="card"><div class="top"><div><div class="name">${esc(s.label)}</div><div class="kind">${esc(s.id)} &middot; ${esc(s.kind || '')} &middot; every ${s.intervalMin} min</div></div><span class="bd ${s.disabledReason ? 'warn' : !s.enabled ? '' : s.healthy ? 'good' : 'bad'}">${s.disabledReason ? 'Disabled' : !s.enabled ? 'Off' : s.healthy ? 'Healthy' : 'Failing'}</span></div>
+<div class="kv"><span>Last successful sync</span><span>${ago(s.lastOk)}</span></div><div class="kv"><span>Last HTTP status</span><span>${s.httpStatus ?? 'none yet'}</span></div><div class="kv"><span>Jobs retrieved</span><span>${s.jobs}</span></div>
+${s.error ? `<p class="why" style="color:#c0392b">${esc(s.error)}</p>` : ''}${s.disabledReason ? `<p class="why">${esc(s.disabledReason)}</p>` : ''}
+<div class="acts"><button onclick="srcAct('${esc(s.id)}','sync')">Sync</button>${s.disabledReason ? `<button onclick="srcApprove('${esc(s.id)}')">Record approval</button>` : `<button onclick="srcToggle('${esc(s.id)}',${!s.enabled})">${s.enabled ? 'Turn off' : 'Turn on'}</button>`}${s.builtin ? '' : `<button onclick="srcDel('${esc(s.id)}')">Delete</button>`}</div></div>`).join('')}
+<div class="sec">Add a source</div><div class="card"><div class="field"><label for="sad">Type</label><select class="in" id="sad">${d.adapters.filter(x => x.configurable && !x.disabled).map(x => `<option value="${x.id}">${esc(x.label)}</option>`).join('')}</select></div><div id="sfl"></div><div class="err" id="ser" role="alert"></div><button class="btn" id="sadd">Add source</button></div>
+<div class="sec">Accuracy of "open"</div><div class="card"><div class="kv"><span>Target</span><span>${pct(a.target)}</span></div><div class="kv"><span>Independent re-checks</span><span>${a.audits} (agreed ${a.agreed})</span></div><div class="kv"><span>Agreement rate</span><span>${pct(a.rate)}${a.ci95 ? ` (95%: ${pct(a.ci95[0])} to ${pct(a.ci95[1])})` : ''}</span></div><div class="kv"><span>Alerts reported as already closed</span><span>${a.reportedClosed} of ${a.alertsChecked}</span></div><p class="why"><b>${verdict}.</b> ${esc(a.note)}</p></div>
+<div class="sec">AI</div><div class="card"><div class="kv"><span>Anthropic key</span><span>${d.ai.enabled ? 'Set' : 'Not set (rules only)'}</span></div><div class="kv"><span>Cheap model (bulk reading)</span><span>${esc(d.ai.cheap)}</span></div><div class="kv"><span>Strong model (CV and letters)</span><span>${esc(d.ai.strong)}</span></div></div>
+<div class="sec">Recent requests</div><div class="card" style="overflow-x:auto">${d.runs.length ? d.runs.map(r => `<div class="kv"><span>${esc(r.source_id)} <small style="color:var(--mute)">${r.kind} &middot; ${ago(r.at)}</small></span><span class="bd ${r.ok ? 'good' : 'bad'}">${r.ok ? r.jobs + ' jobs' : esc(String(r.http_status || '') + ' ' + r.error).trim()}</span></div>`).join('') : '<p class="sub">No requests yet.</p>'}</div>`;
+  const fields = () => { const ad = d.adapters.find(x => x.id === $('#sad').value); $('#sfl').innerHTML = ad ? ad.fields.map(f => `<div class="field"><label for="sf_${f.key}">${esc(f.label)}</label><input class="in" id="sf_${f.key}"></div>`).join('') : ''; };
+  $('#sad').onchange = fields; fields();
+  $('#sadd').onclick = async () => { const ad = d.adapters.find(x => x.id === $('#sad').value); try { await api('/admin/sources', { method: 'POST', body: { adapter: ad.id, config: Object.fromEntries(ad.fields.map(f => [f.key, $('#sf_' + f.key).value])) } }); toast('Source added'); sources(); } catch (e) { $('#ser').textContent = e.message; } };
+  $('#sdg').onclick = async () => {
+    const b = $('#sdg'); b.disabled = true; b.textContent = 'Contacting every source...';
+    try { const r = await api('/admin/sources/diagnose', { method: 'POST', body: {} });
+      $('#sres').innerHTML = `<div class="card"><b>Live diagnostic, ${new Date(r.at * 1000).toLocaleTimeString()}.</b> Real HTTP requests from the server.${r.results.map(x => `<div class="kv"><span>${esc(x.label)}</span><span class="bd ${x.ok ? 'good' : x.skipped ? 'warn' : 'bad'}">${x.ok ? `HTTP ${x.status} &middot; ${x.jobs} jobs &middot; ${x.ms} ms` : esc(x.skipped ? 'skipped: disabled' : (x.status ? 'HTTP ' + x.status + ' ' : '') + x.error)}</span></div>`).join('')}</div>`;
+    } catch (e) { $('#sres').innerHTML = `<div class="note">${esc(e.message)}</div>`; }
+    b.disabled = false; b.textContent = 'Run live diagnostic';
+  };
+  $('#ssy').onclick = () => srcAct(null, 'sync');
+}
+async function srcAct(id, what) { try { toast('Syncing...'); await api('/admin/sources/sync', { method: 'POST', body: id ? { id } : {} }); sources(); } catch (e) { toast(e.message); } }
+async function srcToggle(id, enabled) { try { await api(`/admin/sources/${encodeURIComponent(id)}/toggle`, { method: 'POST', body: { enabled } }); sources(); } catch (e) { toast(e.message); } }
+async function srcDel(id) { if (!confirm('Delete this source? Vacancies it found stay.')) return; try { await api(`/admin/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }); sources(); } catch (e) { toast(e.message); } }
+async function srcApprove(id) {
+  const feedUrl = prompt('Feed URL the owner provided (https://...)'); if (!feedUrl) return;
+  const approvedAccess = prompt('Type YES to confirm the owner approved this access in writing'); if (!approvedAccess) return;
+  try { await api(`/admin/sources/${encodeURIComponent(id)}/approve`, { method: 'POST', body: { feedUrl, approvedAccess } }); toast('Approved and enabled'); sources(); } catch (e) { toast(e.message); }
 }
 
 // ============================================================ plan (the old "Weekly alerts" page)

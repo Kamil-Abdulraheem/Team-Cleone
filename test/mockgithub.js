@@ -13,6 +13,9 @@ export const people = {
   junk1: user("junk1", { bio: null, blog: "", followers: 0, public_repos: 1, created_at: iso(5) }),
   bigorg: { ...user("bigorg"), type: "Organization", followers: 900, public_repos: 120 },
 };
+people.cof1 = user("cof1", { bio: "Founder building a developer-tools startup. Looking for a technical co-founder.", followers: 700, public_repos: 45 });
+people.cof2 = user("cof2", { bio: "Indie hacker. Bootstrapped two SaaS products.", followers: 500, public_repos: 30 });
+people.cof3 = user("cof3", { bio: "Founding engineer at a Series A company", company: "Initech", followers: 300 });
 const joiners = ["j1", "j2", "j3", "j4", "j5", "j6", "j7", "j8"];
 for (const j of joiners) people[j] = user(j, { company: null });
 
@@ -27,6 +30,10 @@ export function mockGithub() {
     const u = decodeURIComponent(String(url));
     if (!u.startsWith("https://api.github.com")) return resp({}, 599);
     n++;
+    if (/\/repos\/me\/cof\/readme/.test(u)) return resp("# cof\nfast file search filesystem tool for developers");
+    if (/\/repos\/me\/cof\/events/.test(u)) return resp(["cof1", "cof2", "cof3", "j1"].map((l, i) => watch(l, 0.5 + i * 0.3)));
+    if (/\/repos\/me\/cof\/(stargazers|forks)/.test(u)) return resp(/forks/.test(u) ? [] : {}, /forks/.test(u) ? 200 : 404);
+    if (/\/repos\/me\/cof$/.test(u)) return resp(repo("me", "User", "cof", { topics: ["search", "filesystem"], stargazers_count: 120, description: "fast file search tool" }));
     if (/\/repos\/me\/proj\/readme/.test(u)) return resp("# proj\nfast file search filesystem tool for developers");
     if (/\/repos\/me\/proj\/events/.test(u)) return resp(stars.map((l, i) => watch(l, 0.2 + i * 0.3)));
     if (/\/repos\/me\/proj\/stargazers/.test(u)) return resp({}, 404);
