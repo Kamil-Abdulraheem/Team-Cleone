@@ -52,6 +52,8 @@ Without it GitHub allows only 60 calls an hour, shared with strangers, and Repo 
 |---|---|
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PLAN_CODE`, `PRO_AMOUNT`, `PRO_CURRENCY` | Real subscriptions (see below) |
 | `RESEND_API_KEY`, `MAIL_FROM` | Password-reset emails (resend.com has a free tier) |
+| `PREVIEW_MODE` | `1` lets anyone in with any email and password, into an isolated test workspace, so you can look around a new deployment. **Turn it off before real users arrive** (see Trying it out) |
+| `HEALTH_DETAIL` | Set to `0` to hide recent error messages on `/api/health` once everything works |
 | `SOURCE_MODE` | Leave UNSET in production. `sandbox` serves clearly-labelled sample vacancies for development with no internet (see Sandbox mode) |
 | `DEFAULT_FEATURES` | Optional. Which features start switched on for new accounts, e.g. `{"repo":true}`. Default: Job Radar on, Repo scan off |
 | `JOB_CHEAP_MODEL`, `JOB_STRONG_MODEL` | Job Radar AI models (defaults `claude-haiku-5-5` and `claude-sonnet-5-5`). Only used when `ANTHROPIC_API_KEY` is set |
@@ -60,6 +62,21 @@ Without it GitHub allows only 60 calls an hour, shared with strangers, and Repo 
 | `ANTHROPIC_API_KEY` (and optionally `SCORE_MODEL`) | Claude for Pro accounts: Repo scan scoring, and Job Radar CV reading, borderline-job reading and letters. Off until you add it. Falls back to the rules if it ever fails |
 
 **Paystack** (works for Nigerian businesses; Stripe does not). Create a Paystack account, create a monthly **Plan**, then set the variables above. `PRO_AMOUNT` is in the smallest unit (kobo or cents) and should match the plan. In Paystack's settings set the webhook URL to `https://YOUR-SITE/api/billing/webhook`. Until these are set, the plan page shows the waitlist form, as in the prototype.
+
+## Trying it out, and fixing it when it does not work
+
+**Open `/api/health` first** (for example `https://your-site.vercel.app/api/health`). It works even when the database does not, and it tells you in plain words what is wrong and what to do: missing or wrong `DATABASE_URL`, wrong password, a sleeping database, tables not created, and the last few unexpected errors. It never shows a secret. If that page itself is an error page from Vercel, open Vercel > your project > **Logs** and read the newest red line for `/api`.
+
+After you add or change any variable in Vercel, go to **Deployments > the latest one > Redeploy**. Changes do not apply until you do.
+
+**Preview mode.** Set `PREVIEW_MODE` to `1` in Vercel and redeploy. The login and sign-up screens then accept any email and any password and open a separate preview workspace. This is safe by design, but it is for testing only:
+
+- A preview login never opens a real account. If the email belongs to a real account or is in `ADMIN_EMAILS`, the normal password check applies. So the owner signs up once with a real password (as the admin) and keeps full access.
+- Preview workspaces are never admin, never use AI or send email, and have their own limits (20 scans a month, all matches unlocked) so every feature can be looked at.
+- Each typed email gets its own workspace, and anyone typing the same email enters the same one. Do not put anything real in it.
+- A yellow bar on every screen says it is on. **Delete the variable and redeploy before real users arrive**, otherwise nobody can create a real account.
+
+**The home screen** is an "Ask for anything" bar. Type what you want in plain words, such as "backend developer jobs in Lagos" or "only remote now", or paste a GitHub repo. The "+" adds your CV or switches on Repo scan, the microphone fills the box by voice, Recent activities shows what you did, and the bottom tabs are Home, Explore (your matches), History (everything you did) and Account.
 
 ## Features (switch on what you need)
 

@@ -41,16 +41,17 @@ b.type("#nm", "<img src=x onerror=window.__pwned=1> Ada"); b.type("#em", "ada@st
 await wait(() => b.q("#er").textContent);
 ok("short password shows a readable error under the form", /at least 8/.test(b.q("#er").textContent));
 b.type("#pw", "correct horse battery"); b.click("#ok");
-await wait(() => b.q(".home h1")?.textContent === "Ready when you are.");
-ok("signup lands on the prototype home screen", b.q(".home h1")?.textContent === "Ready when you are.");
-ok("home keeps the prototype's input and text", b.q("#url").placeholder === "Paste your GitHub repo URL" && b.qa(".home .row").length === 3 && /Scan my repo/.test(b.text()));
+await wait(() => b.q(".greet")?.textContent === "How can I help you today?");
+ok("signup lands on the new home screen", b.q(".greet")?.textContent === "How can I help you today?");
+ok("home has the ask bar, recent activities and the bottom tabs", b.q("#url").placeholder === "Ask for anything" && /Recent activities/.test(b.text()) && !/Featured models/i.test(b.text()) && b.qa("#tabs button").map((x) => x.textContent).join("|") === "Home|Explore|History|Account" && b.q("#tabs").classList.contains("on") && !!b.q("#bell") && !!b.q("#mic"));
 ok("Upgrade button shows on Free", b.q("#upg").style.display === "");
 ok("name containing HTML is shown as text, not run", !b.w.__pwned && !b.q("#side img") && /<img/.test(b.q(".me b").textContent));
 ok("sidebar has the account row with plan", /Free plan/.test(b.q(".me small").textContent) && b.q(".av").textContent === "<");
 
 // ============================================================ scan
 b.type("#url", "not a repo"); b.click("#go");
-ok("bad repo gives the prototype's message", b.toast() === "Enter a repo like github.com/owner/name");
+await wait(() => /I understand things like/.test(b.q("#reply")?.textContent || ""));
+ok("text that is not a repo is treated as a request and answered with help, not an error", /I understand things like/.test(b.q("#reply").textContent));
 b.type("#url", "github.com/me/proj"); b.click("#go");
 ok("progress screen uses the prototype's four lines", b.q("h2")?.textContent === "Scanning proj" && b.qa("#st p").length === 4 && b.qa("#st p")[0].textContent === "Reading your README and recent commits");
 ok("last line is honest about rule-based scoring", b.qa("#st p")[3].textContent === "Scoring each match");
@@ -127,8 +128,8 @@ b.click(".me"); await wait(() => b.q("#panel .row")); b.qa("#panel .row")[2].cli
 await wait(() => b.q(".home h1")?.textContent === "Welcome back");
 ok("log out returns to the log-in screen", b.q(".home h1").textContent === "Welcome back" && !b.jar.cookie);
 b.type("#em", "ada@startup.com"); b.type("#pw", "a brand new password"); b.click("#ok");
-await wait(() => b.q(".home h1")?.textContent === "Ready when you are.");
-ok("log in works with the new password and keeps the theme", b.q(".home h1")?.textContent === "Ready when you are." && b.d.documentElement.dataset.theme === "dark");
+await wait(() => b.q(".greet")?.textContent === "How can I help you today?");
+ok("log in works with the new password and keeps the theme", b.q(".greet")?.textContent === "How can I help you today?" && b.d.documentElement.dataset.theme === "dark");
 
 // ============================================================ delete account
 b.click(".me"); await wait(() => b.q("#panel .row")); b.qa("#panel .row")[0].click();
@@ -146,8 +147,8 @@ app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}', ADMIN_EMAILS: "boss@cle
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#nm", "Boss"); b.type("#em", "boss@cleone.app"); b.type("#pw", "correct horse battery"); b.click("#ok");
-await wait(() => b.q(".home h1")?.textContent === "Ready when you are.");
-ok("Pro account: Upgrade button is hidden and the plan is shown", b.q("#upg").style.display === "none" && /Pro plan/.test(b.q(".me small").textContent));
+await wait(() => b.q(".greet")?.textContent === "How can I help you today?");
+ok("Pro account: the header pill says Pro and the plan is shown", b.q("#upt").textContent === "Pro" && /Pro plan/.test(b.q(".me small").textContent));
 b.type("#url", "me/proj"); b.click("#go");
 await wait(() => b.q("h2")?.textContent === "me/proj");
 b.click(".tabs button:nth-child(2)");
@@ -161,7 +162,7 @@ app = await makeApp({ DEFAULT_FEATURES: '{"repo":true}', PAYSTACK_SECRET_KEY: "k
 b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#em", "free@user.com"); b.type("#pw", "correct horse battery"); b.click("#ok");
-await wait(() => b.q(".home h1")?.textContent === "Ready when you are.");
+await wait(() => b.q(".greet")?.textContent === "How can I help you today?");
 b.click("#upg");
 ok("payments on: the plan page offers Upgrade to Pro instead of the waitlist", !!b.q("#up2") && !b.q("#jn"));
 await app.restore();

@@ -35,8 +35,8 @@ const app = await makeApp({ SOURCE_MODE: "sandbox", ADMIN_EMAILS: "boss@x.com" }
 let b = await browser(app);
 await wait(() => b.q("#sw")); b.click("#sw");
 b.type("#nm", "Ada"); b.type("#em", "ada@x.com"); b.type("#pw", PW); b.click("#ok");
-await wait(() => /Your job profile/.test(b.text()));
-ok("a new user lands on Job Radar, not Repo scan", /Your job profile/.test(b.text()) && !b.q(".home h1"));
+await wait(() => b.q(".greet"));
+ok("a new user lands on the new home screen (ask bar), not Repo scan", b.q(".greet").textContent === "How can I help you today?" && /Recent activities/.test(b.text()) && !/Scan my repo/.test(b.text()));
 const side = () => b.q("#side").textContent;
 ok("side menu: Job Radar is there, Repo scan is not, until switched on", /Job Radar/.test(side()) && !/Scan a repo/.test(side()) && !/Source Intelligence/.test(side()));
 b.w.eval("nav('features')"); await wait(() => b.q(".sw[data-k]"));
@@ -46,8 +46,25 @@ ok("switching Repo scan on adds it to the side menu", /Scan a repo/.test(side())
 b.click('.sw[data-k="repo"]'); await wait(() => !/Scan a repo/.test(side()));
 ok("and switching it off removes it", !/Scan a repo/.test(side()));
 
+// the ask bar: plain language drives Job Radar
+b.w.eval("nav('home')"); await wait(() => b.q("#url"));
+b.type("#url", "backend engineer jobs in Lagos"); b.click("#go");
+await wait(() => b.qa(".card.tap").length > 0 && /Confirmed open|Could not verify|Adjacent/.test(b.text()), 20000);
+ok("typing 'backend engineer jobs in Lagos' creates a profile, scans and shows matches", /Job Radar/.test(b.text()) && b.qa(".card.tap").length > 0);
+ok("the request is saved to the profile", (await app.one("SELECT roles, location FROM job_profiles")).roles === "backend engineer" && (await app.one("SELECT location FROM job_profiles")).location === "Lagos");
+b.w.eval("nav('home')"); await wait(() => /backend engineer jobs in Lagos|Scanned job sources/.test(b.q("#acts")?.textContent || ""));
+ok("Recent activities now lists what just happened", /Scanned job sources/.test(b.q("#acts").textContent) && /backend engineer jobs in Lagos/.test(b.q("#acts").textContent));
+b.w.eval("nav('history')"); await wait(() => /History/.test(b.text()) && /Today/.test(b.text()));
+ok("History tab groups activity by day", /Today/.test(b.text()) && b.qa(".act").length >= 2);
+b.w.eval("nav('account')"); await wait(() => /Log out/.test(b.text()));
+ok("Account tab shows the profile, plan and shortcuts", /Features/.test(b.text()) && /Settings/.test(b.text()) && /Job profile and CV/.test(b.text()) && !/Source Intelligence/.test(b.text()));
+b.w.eval("nav('home')"); await wait(() => b.q("#url"));
+b.type("#url", "github.com/me/proj"); b.click("#go");
+await wait(() => /Turn on Repo scan/.test(b.q("#reply")?.textContent || ""));
+ok("pasting a repo while Repo scan is off offers to switch it on, not an error", /Repo scan is switched off/.test(b.q("#reply").textContent));
+
 // profile -> scan -> results
-b.w.eval("nav('jobs')"); await wait(() => b.q("#jr_"));
+b.w.eval("jobProfile()"); await wait(() => b.q("#jr_"));
 ok("profile form has qualification and work-type fields", !!b.q("#jed") && !!b.q("#jem"));
 b.type("#jr_", "backend engineer"); b.type("#jcv", "Python and Django developer with 4 years of experience. BSc."); b.click("#jsv");
 await wait(() => b.q("#js"), 15000); await wait(() => /Acme|Backend|Python|Engineer/.test(b.text()) || b.qa(".card.tap").length > 0, 15000);

@@ -2,6 +2,8 @@
 // Sections: helpers -> account screens -> home and scan -> radar -> plan -> settings -> start-up.
 
 const I = {
+mic:'<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+arrow:'<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
 scan:'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
 radar:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg>',
 bell:'<svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg>',
@@ -40,11 +42,11 @@ async function api(path, opts = {}) {
   let data = {};
   try { data = await res.json(); } catch (e) {}
   if (res.status === 401 && !path.startsWith('/auth/')) { S.me = null; auth('login'); throw new Error('Please log in'); }
-  if (!res.ok) { const err = new Error(data.error || 'Something went wrong'); err.status = res.status; throw err; }
+  if (!res.ok) { const err = new Error(data.error || `The server had a problem (HTTP ${res.status}). Open /api/health to see what is wrong.`); err.status = res.status; throw err; }
   return data;
 }
 
-const nav = v => { $('#side').classList.remove('on'); if (!S.me && v !== 'auth') return auth('login'); ({ home, radar, alerts, settings, features, jobs, jobAlerts, sources })[v](); };
+const nav = v => { $('#side').classList.remove('on'); if (!S.me && v !== 'auth') return auth('login'); ({ home, radar, alerts, settings, features, jobs, jobAlerts, sources, explore, history: showHistory, account })[v](); };
 
 function theme(t) {
   const r = document.documentElement;
@@ -52,9 +54,16 @@ function theme(t) {
   try { localStorage.setItem('cleone.theme', t || 'system'); } catch (e) {}
 }
 
-function chrome(signedIn) {
+function chrome(signedIn, tab) {
+  const p = S.me && S.me.plan;
   $('#menu').style.visibility = signedIn ? 'visible' : 'hidden';
-  $('#upg').style.display = signedIn && S.me && S.me.plan === 'free' ? '' : 'none';
+  $('#bell').style.visibility = signedIn ? 'visible' : 'hidden';
+  $('#upg').style.display = signedIn ? '' : 'none';
+  $('#upt').textContent = p === 'pro' ? 'Pro' : p === 'preview' ? 'Preview' : 'Upgrade';
+  $('#tabs').classList.toggle('on', !!signedIn);
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  const pv = $('#pv'); pv.classList.toggle('on', !!(signedIn && S.me && S.me.preview));
+  pv.textContent = 'Preview mode: any email and password works here. This space is for testing.';
 }
 
 // ============================================================ account screens
@@ -63,7 +72,7 @@ function auth(mode) {
   chrome(false);
   const up = mode === 'signup';
   $('#main').innerHTML = `<div class="home"><h1>${up ? 'Create your account' : 'Welcome back'}</h1><div>
-<p class="sub center">${up ? 'Free to start. 3 scans a month, no card needed.' : 'Log in to see who is paying attention to your project.'}</p>
+<p class="sub center">${S.cfg && S.cfg.preview ? 'Preview mode: type any email and any password to look around.' : up ? 'Free to start. 3 scans a month, no card needed.' : 'Log in to find jobs and see who is paying attention to your project.'}</p>
 ${up ? '<div class="field"><label for="nm">Name</label><input class="in" id="nm" autocomplete="name" placeholder="Your name"></div>' : ''}
 <div class="field"><label for="em">Email</label><input class="in" id="em" type="email" autocomplete="email" autocapitalize="off" placeholder="you@startup.com"></div>
 <div class="field"><label for="pw">Password</label><input class="in" id="pw" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" placeholder="${up ? 'At least 8 characters' : 'Your password'}"></div>
@@ -121,6 +130,7 @@ async function session() {
   chrome(true);
   try { S.recent = (await api('/scans')).scans.map(s => s.repo); } catch (e) { S.recent = []; }
   side();
+  try { if (S.me.features && S.me.features.jobs !== false) { const seen = +(localStorage.getItem('cleone.seen') || 0); const al = (await api('/jobs/alerts')).alerts; $('#dot').classList.toggle('on', al.some(a => a.at > seen)); } } catch (e) {}
 }
 
 function side() {
@@ -145,17 +155,102 @@ async function openRepo(repo) { $('#side').classList.remove('on'); S.tab = 'stra
 // ============================================================ home and scan
 
 function home() {
-  chrome(true);
-  if (S.me.features && !S.me.features.repo) return S.me.features.jobs ? jobs() : features();
-  $('#main').innerHTML = `<div class="home"><h1>Ready when you are.</h1><div>
-<button class="row" onclick="$('#url').focus()">${I.scan}Scan my repo</button>
-<button class="row" onclick="nav('radar')">${I.radar}Open my radar</button>
-<button class="row" onclick="nav('alerts')">${I.bell}${S.me.plan === 'pro' ? 'Your plan' : 'Upgrade to Pro'}</button>
-<div class="bar"><input id="url" placeholder="Paste your GitHub repo URL" aria-label="GitHub repo URL" autocapitalize="off">
-<div class="b"><button class="ic" aria-label="Add" id="add">${I.plus}</button><button class="go" id="go" aria-label="Scan">${I.send}</button></div></div></div></div>`;
-  $('#go').onclick = scan; $('#url').onkeydown = e => { if (e.key === 'Enter') scan(); };
-  $('#add').onclick = () => { if (S.recent[0]) { $('#url').value = 'github.com/' + S.recent[0]; toast('Last scanned repo filled in'); } else toast('Paste a link like github.com/owner/name'); };
+  chrome(true, 'home');
+  const f = S.me.features || {};
+  $('#main').innerHTML = `<div class="hm"><h1 class="greet">How can I help you today?</h1>
+<div class="ask"><button class="plus" id="add" aria-label="Add">${I.plus}</button><input id="url" placeholder="Ask for anything" aria-label="Ask for anything" autocapitalize="off" autocomplete="off" enterkeyhint="send"><button class="ic mic" id="mic" aria-label="Speak">${I.mic}</button><button class="go ic" id="go" aria-label="Send">${I.send}</button></div>
+<div id="reply"><p class="hint">Try &ldquo;backend developer jobs in Lagos&rdquo;${f.repo ? ' or paste a GitHub repo' : ''}.</p></div>
+<div class="sech"><span>Recent activities</span><button class="ic" id="allh" aria-label="See all activity">${I.arrow}</button></div><div id="acts"><div class="empty">Loading...</div></div></div>`;
+  $('#go').onclick = ask; $('#url').onkeydown = e => { if (e.key === 'Enter') ask(); };
+  $('#mic').onclick = listen; $('#add').onclick = plusMenu; $('#allh').onclick = () => nav('history');
+  loadActs();
 }
+
+const ACT = { job: I.briefcase, job_scan: I.scan, job_state: I.briefcase, job_alert: I.bell, job_closed: I.out, command: I.scan, repo: I.radar };
+const ago_ = t => { const m = Math.max(0, Math.floor((Date.now() / 1000 - t) / 60)); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.floor(m / 60) + ' h ago' : Math.floor(m / 1440) + ' days ago'; };
+const actCard = a => `<button class="act" onclick="openAct('${esc(a.kind)}','${esc(a.ref || '')}')"><span class="ai">${ACT[a.kind] || I.scan}</span><span class="tx"><b>${esc(a.title)}</b><small>${esc(({ repo: 'Repo scan', job_scan: 'Job Radar', job_state: 'Job Radar', job_alert: 'Alert', job_closed: 'Closed', command: 'Asked' })[a.kind] || 'Activity')}${a.detail && a.kind !== 'repo' ? ' &middot; ' + esc(a.detail) : ''} &middot; ${ago_(a.at)}</small></span></button>`;
+
+async function loadActs() {
+  try {
+    const r = await api('/activity?limit=4'), box = $('#acts'); if (!box) return;
+    box.innerHTML = r.items.length ? r.items.map(actCard).join('') : '<div class="empty">Nothing yet. Ask me to find jobs, for example &ldquo;data analyst jobs in Abuja&rdquo;, and your activity will appear here.</div>';
+  } catch (e) { const box = $('#acts'); if (box) box.innerHTML = ''; }
+}
+
+function openAct(kind, ref) {
+  if (kind === 'repo') return openRepo(ref);
+  if (kind.startsWith('job_') && ref && kind !== 'job_scan') return jobDetail(ref);
+  nav('explore');
+}
+
+const REPO_RE = /^(?:github\.com\/)?([\w.-]+)\/([\w.-]+)$/i;
+const looksRepo = v => /github\.com\//i.test(v) || REPO_RE.test(v.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, ''));
+
+async function ask() {
+  if (S.busy) return;
+  const el = $('#url'), v = el.value.trim(); if (!v) return;
+  const box = $('#reply'), f = S.me.features || {};
+  if (looksRepo(v) && !/\s/.test(v)) {
+    if (!f.repo) { box.innerHTML = `<div class="reply">Repo scan is switched off. Turn it on to scan <b>${esc(v)}</b>.<div class="acts"><button class="p" id="onr">Turn on Repo scan</button></div></div>`; $('#onr').onclick = async () => { try { S.me = await api('/me', { method: 'PATCH', body: { prefs: { features: { repo: true } } } }); side(); scan(); } catch (e) { toast(e.message); } }; return; }
+    return scan();
+  }
+  if (f.jobs === false) { box.innerHTML = '<div class="reply">Job Radar is switched off. <button class="lnk" onclick="nav(\'features\')">Turn it on in Features</button></div>'; return; }
+  box.innerHTML = '<div class="reply">Thinking...</div>'; S.busy = true;
+  try {
+    const d = await api('/jobs/command', { method: 'POST', body: { text: v } });
+    el.value = ''; box.innerHTML = `<div class="reply">${esc(d.reply)}</div>`;
+    if (d.scan) { S.busy = false; await runJobScan(); return; }
+    loadActs();
+  } catch (e) { box.innerHTML = `<div class="reply err">${esc(e.message)}</div>`; }
+  S.busy = false;
+}
+
+function listen() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return toast('Voice input is not supported in this browser');
+  try {
+    const r = new SR(); r.lang = navigator.language || 'en-US'; r.interimResults = false; r.maxAlternatives = 1;
+    r.onresult = e => { const el = $('#url'); if (el) { el.value = e.results[0][0].transcript; el.focus(); } };
+    r.onerror = e => toast(e.error === 'not-allowed' ? 'Allow the microphone to use voice' : 'Could not hear you. Try again.');
+    r.start(); toast('Listening...');
+  } catch (e) { toast('Voice input is not available right now'); }
+}
+
+function plusMenu() {
+  const f = S.me.features || {};
+  open_(`<h2 style="margin-top:0">Add</h2><div class="lst">
+<button class="row" onclick="close_();jobProfile()">${I.briefcase}Add or update my CV</button>
+<button class="row" onclick="close_();${f.repo ? "$('#url').focus();toast('Paste a repo like github.com/owner/name')" : "nav('features')"}">${I.scan}${f.repo ? 'Scan a GitHub repo' : 'Turn on Repo scan'}</button>
+<button class="row" onclick="close_();nav('features')">${I.sliders}Features</button></div>`);
+}
+
+async function jobProfile() { try { chrome(true, 'explore'); jobSetup(await api('/jobs/profile')); } catch (e) { toast(e.message); } }
+
+// ---- History and Account (bottom tabs)
+
+async function showHistory() {
+  chrome(true, 'history');
+  let r; try { r = await api('/activity?limit=60'); } catch (e) { toast(e.message); return; }
+  const day = t => { const d = new Date(t * 1000), n = new Date(), y = new Date(Date.now() - 864e5); return d.toDateString() === n.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  let last = '', html = '';
+  for (const a of r.items) { const d = day(a.at); if (d !== last) { html += `<div class="day">${d}</div>`; last = d; } html += actCard(a); }
+  $('#main').innerHTML = `<h2>History</h2><p class="sub">What you asked, scanned, saved and applied to.</p>${html || '<div class="empty">No activity yet.</div>'}`;
+}
+
+function account() {
+  chrome(true, 'account');
+  const u = S.me.user, f = S.me.features || {}, n = u.name || u.email;
+  const shown = S.me.preview ? 'Preview workspace' : u.email;
+  $('#main').innerHTML = `<h2>Account</h2><div class="prof"><span class="av">${esc(n.trim().charAt(0).toUpperCase())}</span><span><b>${esc(n)}</b><br><small style="color:var(--mute)">${esc(shown)} &middot; ${esc(S.me.planLabel)} plan</small></span></div>
+<div class="lst">${f.jobs ? `<button class="row" onclick="jobProfile()">${I.briefcase}Job profile and CV</button>` : ''}
+<button class="row" onclick="nav('features')">${I.sliders}Features</button>
+<button class="row" onclick="nav('alerts')">${I.bell}${S.me.plan === 'free' ? 'Upgrade to Pro' : 'Your plan'}</button>
+<button class="row" onclick="nav('settings')">${I.gear}Settings</button>
+${S.me.admin ? `<button class="row" onclick="nav('sources')">${I.radar}Source Intelligence</button>` : ''}
+<button class="row" onclick="logout()">${I.out}Log out</button></div>`;
+}
+
+function explore() { const f = S.me.features || {}; return f.jobs !== false ? jobs() : f.repo ? radar(S.recent[0]) : features(); }
 
 async function scan() {
   if (S.busy) return;
@@ -193,7 +288,7 @@ const lockedCard = x => `<div class="card lock"><div class="blur">${inner(FAKE)}
 
 async function radar(repo) {
   if (!S.me) return auth('login');
-  chrome(true);
+  chrome(true, 'explore');
   let r;
   try { r = await api('/radar' + (repo ? '?repo=' + encodeURIComponent(repo) : '')); } catch (e) { toast(e.message); return; }
   S.radar = r;
@@ -250,7 +345,7 @@ const FEATURES = [
   { k: 'jobs', name: 'Job Radar', text: 'Finds jobs across many sources that fit your CV. Checks each one is still open, warns about scams, explains every match and tracks your applications.' }];
 
 function features() {
-  chrome(true);
+  chrome(true, 'account');
   const f = S.me.features || {};
   $('#main').innerHTML = `<button class="back" onclick="nav('${f.repo ? 'home' : 'features'}')">${I.back}Home</button><h2>Features</h2><p class="sub">Switch on what you need. Each one shows up in the side menu.</p>
 ${FEATURES.map(x => `<div class="card"><div class="w"><span><b>${x.name}</b><br><small style="color:var(--mute)">${x.text}</small></span><button class="sw ${f[x.k] ? 'on' : ''}" data-k="${x.k}" role="switch" aria-checked="${!!f[x.k]}" aria-label="${x.name}"></button></div></div>`).join('')}`;
@@ -270,7 +365,7 @@ const jobCard = j => `<div class="card tap" role="button" tabindex="0" onclick="
 
 async function jobs() {
   if (!S.me) return auth('login');
-  chrome(true);
+  chrome(true, 'explore');
   let pr, list;
   try { pr = await api('/jobs/profile'); } catch (e) { toast(e.message); return; }
   if (!pr.profile) return jobSetup(pr);
@@ -292,14 +387,19 @@ ${list.open.length + list.unverified.length + (list.adjacent || []).length + lis
   try { const m = await api('/jobs/market'); if (m.openRoles) $('#mk').innerHTML = `<div class="sec">The market${m.role ? ' for ' + esc(m.role) : ''}</div><div class="card"><div class="kv"><span>Open roles we can see</span><span>${m.openRoles}</span></div>${m.medianAgeDays != null ? `<div class="kv"><span>Typical age of an open role</span><span>${m.medianAgeDays} days</span></div>` : ''}${m.salary ? `<div class="kv"><span>Stated pay (${m.salary.n} jobs)</span><span>${money(m.salary.low)} to ${money(m.salary.high)}</span></div>` : '<div class="kv"><span>Pay</span><span>Rarely stated</span></div>'}${m.hiringOften.length ? `<div class="kv"><span>Hiring often</span><span>${m.hiringOften.slice(0, 3).map(h => esc(h.company)).join(', ')}</span></div>` : ''}</div>`; } catch (e) {}
 }
 
-async function jobScan() {
-  const b = $('#js'); b.disabled = true; b.textContent = 'Scanning job boards...';
+const jobScan = () => runJobScan($('#js'));
+async function runJobScan(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Scanning job sources...'; }
+  const rep = $('#reply'); if (rep) rep.innerHTML = '<div class="reply">Scanning job sources. This can take up to 30 seconds the first time...</div>';
   try {
     const r = await api('/jobs/scan', { method: 'POST' });
     const bad = r.sources.filter(s => !s.ok);
     toast(`${r.matched} matches. ${r.checked} pages checked.${bad.length ? ' ' + bad.length + ' source down.' : ''}`);
     S.me = await api('/me'); jobs();
-  } catch (e) { b.disabled = false; b.textContent = 'Scan for jobs'; toast(e.message); }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Scan for jobs'; }
+    if (rep) rep.innerHTML = `<div class="reply err">${esc(e.message)}</div>`; else toast(e.message);
+  }
 }
 
 function jobSetup(pr) {
@@ -363,7 +463,7 @@ async function jobState(id, state, note) { try { const r = await api(`/jobs/${id
 async function jobReport(id, kind) { try { await api(`/jobs/${id}/report`, { method: 'POST', body: { kind } }); close_(); toast('Thanks. This helps everyone.'); jobs(); } catch (e) { toast(e.message); } }
 
 async function jobAlerts() {
-  chrome(true);
+  chrome(true, 'explore');
   let r; try { r = await api('/jobs/alerts'); } catch (e) { toast(e.message); return; }
   const label = { new: 'New, checked open', closed: 'Just closed. Do not apply', followup: 'Time to follow up' };
   $('#main').innerHTML = `<button class="back" onclick="nav('jobs')">${I.back}Job Radar</button><h2>Job alerts</h2><p class="sub">We only alert on jobs we confirmed open, and tell you if one closes.${S.me.plan === 'free' ? ' Alerts are part of Pro.' : ''}</p>
@@ -375,7 +475,7 @@ ${r.alerts.length ? r.alerts.map(a => `<div class="card tap" role="button" tabin
 const ago = t => { if (!t) return 'never'; const m = Math.floor((Date.now() / 1000 - t) / 60); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.floor(m / 60) + ' h ago' : Math.floor(m / 1440) + ' days ago'; };
 
 async function sources() {
-  chrome(true);
+  chrome(true, 'account');
   let d; try { d = await api('/admin/sources/dashboard'); } catch (e) { $('#main').innerHTML = `<h2>Source Intelligence</h2><p class="sub">${esc(e.message)}</p>`; return; }
   S.src = d; const m = d.metrics;
   const metric = (label, value, hint) => `<div class="card" style="padding:12px 14px;margin:0"><div class="sub" style="font-size:.8rem;margin:0">${label}</div><div style="font-size:1.6rem;font-weight:700">${value}</div><div class="sub" style="font-size:.78rem;margin:0">${hint}</div></div>`;
@@ -421,7 +521,7 @@ async function srcApprove(id) {
 // ============================================================ plan (the old "Weekly alerts" page)
 
 function alerts() {
-  chrome(true);
+  chrome(true, 'account');
   const m = S.me, pro = m.plan === 'pro', sub = m.subscription;
   let action;
   if (pro) {
@@ -445,7 +545,7 @@ async function portal() { try { const r = await api('/billing/portal', { method:
 // ============================================================ settings
 
 async function settings() {
-  chrome(true);
+  chrome(true, 'account');
   const m = S.me, p = m.prefs || {}, th = p.theme || 'system', sub = m.subscription;
   const pct = Math.min(100, Math.round(100 * m.usage.scans / m.usage.limit));
   $('#main').innerHTML = `<button class="back" onclick="nav('home')">${I.back}Home</button><h2>Settings</h2>
@@ -500,6 +600,8 @@ async function outreachLog() {
 $('#sheet').onclick = e => { if (e.target.id === 'sheet') close_(); };
 $('#menu').onclick = () => $('#side').classList.toggle('on');
 $('#upg').onclick = () => nav('alerts');
+$('#bell').onclick = () => { try { localStorage.setItem('cleone.seen', String(Math.floor(Date.now() / 1000))); } catch (e) {} $('#dot').classList.remove('on'); (S.me && S.me.features && S.me.features.jobs === false) ? toast('No notifications yet') : nav('jobAlerts'); };
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) nav(b.dataset.t); };
 
 (async function boot() {
   try { const t = localStorage.getItem('cleone.theme'); if (t && t !== 'system') theme(t); } catch (e) {}
