@@ -12,7 +12,7 @@ Plain HTML, CSS and JavaScript. No build step, no framework, no TypeScript. It r
 | Scoring and drafts | `lib/score.js` | Rule-based scores, outreach text, the paywall ranking |
 | Numbers you may want to change | `lib/config.js`, top of `lib/engine.js` | Plan limits, cutoff, strictness |
 | Database | `schema.sql`, `lib/postgres.js` | 11 small tables. The app creates them by itself |
-| Vercel entry | `api/[...path].js`, `vercel.json` | Starts the backend on Vercel |
+| Vercel entry | `api/index.js`, `vercel.json` | Starts the backend on Vercel |
 
 ---
 
@@ -66,6 +66,8 @@ Without it GitHub allows only 60 calls an hour, shared with strangers, and Repo 
 ## Trying it out, and fixing it when it does not work
 
 **Open `/api/health` first** (for example `https://your-site.vercel.app/api/health`). It works even when the database does not, and it tells you in plain words what is wrong and what to do: missing or wrong `DATABASE_URL`, wrong password, a sleeping database, tables not created, and the last few unexpected errors. It never shows a secret. If that page itself is an error page from Vercel, open Vercel > your project > **Logs** and read the newest red line for `/api`.
+
+**If login or sign-up says HTTP 404:** Vercel is not sending `/api/...` to the app. All API requests go to `api/index.js` through the rewrite in `vercel.json`. In Vercel > Project > Settings > General check that **Root Directory** is empty, **Framework Preset** is *Other*, and **Output Directory** is `public` (or empty); then Redeploy. Open `/api/health`: if it answers, routing works.
 
 After you add or change any variable in Vercel, go to **Deployments > the latest one > Redeploy**. Changes do not apply until you do.
 

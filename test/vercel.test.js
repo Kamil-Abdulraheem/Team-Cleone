@@ -1,6 +1,7 @@
 // Runs the Vercel wrapper inside a real HTTP server, to prove the Node <-> web conversion is right.
 import http from "node:http";
-import { createNodeHandler } from "../lib/node.js";
+import fs from "node:fs";
+import { createNodeHandler, originalUrl } from "../lib/node.js";
 import { makeApp } from "./harness.js";
 
 let pass = 0, fail = 0;
@@ -51,6 +52,28 @@ ok("a tampered webhook is rejected", r.status === 401);
 
 r = await call("POST", "/api/auth/logout", undefined, { cookie: session });
 ok("logout clears the cookie", /Max-Age=0/.test(r.headers.get("set-cookie") || ""));
+
+
+// ---- routing: every /api/... path must reach the one function file
+{
+  const cfg = JSON.parse(fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+  const fn = Object.keys(cfg.functions)[0];
+  ok("vercel.json: the function file it configures exists", fs.existsSync(new URL("../" + fn, import.meta.url)) && fn === "api/index.js");
+  ok("vercel.json: all /api paths (any depth) are rewritten to that function with the path kept", cfg.rewrites.some((r) => r.source === "/api/:path*" && r.destination === "/api/index?path=:path*"));
+  ok("vercel.json: the cron path goes through the same rewrite", cfg.crons.every((c) => c.path.startsWith("/api/")));
+  ok("no catch-all filename is used (it is not reliably routed for nested paths)", !fs.readdirSync(new URL("../api", import.meta.url)).some((f) => f.includes("[")));
+  ok("original path is rebuilt from the rewrite", originalUrl("/api/index?path=auth/login") === "/api/auth/login" && originalUrl("/api/index?path=activity&limit=2") === "/api/activity?limit=2" && originalUrl("/api/index?path=jobs/abc/draft") === "/api/jobs/abc/draft" && originalUrl("/api/index") === "/api" && originalUrl("/api?path=") === "/api");
+  ok("a path the platform already kept is left alone", originalUrl("/api/auth/login") === "/api/auth/login" && originalUrl("/api/activity?limit=3") === "/api/activity?limit=3");
+  let rr = await call("GET", "/api/index?path=config");
+  ok("a rewritten GET reaches the right route", rr.status === 200 && (await rr.json()).payments !== undefined);
+  rr = await call("GET", "/api/index?path=health");
+  ok("a rewritten /api/health works", rr.status === 200 && (await rr.json()).app === "cleone");
+  rr = await call("POST", "/api/index?path=auth/signup", { email: "rw@startup.com", password: "correct horse battery", name: "Rw" });
+  const cookie = (rr.headers.get("set-cookie") || "").split(";")[0];
+  ok("a rewritten nested POST (signup) works and sets the session cookie", rr.status === 201 && cookie.includes("="), String(rr.status));
+  rr = await call("GET", "/api/index?path=activity&limit=1", undefined, { cookie });
+  ok("a rewritten GET keeps its own query string and the login cookie", rr.status === 200 && Array.isArray((await rr.json()).items));
+}
 
 server.close();
 await app.restore();
